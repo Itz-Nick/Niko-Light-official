@@ -1,0 +1,1281 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NikoLight</title>
+    <style>
+      :root {
+        --bg: #0b0f14;
+        --panel: rgba(16, 20, 26, 0.92);
+        --border: rgba(255, 255, 255, 0.09);
+        --text: #e6edf3;
+        --muted: #9fb0c0;
+        --blue: #38b6ff;
+        --blue-bright: #6ec8ff;
+        --green: #3ddc84;
+        --gold: #ffd166;
+        --red: #ff4655;
+        --pink: #ff8fa3;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: var(--bg);
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        color: var(--text);
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      #game {
+        display: block;
+        cursor: crosshair;
+      }
+
+      .screen {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(6, 9, 14, 0.78);
+        backdrop-filter: blur(3px);
+        z-index: 20;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 34px 40px;
+        min-width: 320px;
+        text-align: center;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
+      }
+
+      .panel h2 {
+        margin: 0 0 22px;
+        font-size: 26px;
+        letter-spacing: 1px;
+        color: var(--blue-bright);
+      }
+
+      .title {
+        margin: 0 0 4px;
+        font-size: 54px;
+        font-weight: 800;
+        letter-spacing: 2px;
+        line-height: 1;
+      }
+
+      .title-accent {
+        color: var(--blue);
+        text-shadow: 0 0 22px rgba(56, 182, 255, 0.6);
+      }
+
+      .subtitle {
+        margin: 0 0 28px;
+        color: var(--muted);
+        font-size: 14px;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+      }
+
+      .btn {
+        display: block;
+        width: 100%;
+        margin: 10px 0;
+        padding: 12px 18px;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+      }
+
+      .btn:hover {
+        background: rgba(255, 255, 255, 0.09);
+        border-color: rgba(255, 255, 255, 0.2);
+      }
+
+      .btn:active {
+        transform: scale(0.98);
+      }
+
+      .btn-primary {
+        background: linear-gradient(180deg, #4ec2ff, var(--blue));
+        color: #0b0e11;
+        border-color: transparent;
+      }
+
+      .btn-primary:hover {
+        background: linear-gradient(180deg, #6ec8ff, var(--blue-bright));
+        border-color: transparent;
+      }
+
+      .btn-danger {
+        color: var(--pink);
+        border-color: rgba(255, 143, 163, 0.35);
+      }
+
+      .btn-danger:hover {
+        background: rgba(255, 70, 85, 0.14);
+        border-color: var(--red);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .modes-grid {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      .mode-card {
+        flex: 1;
+        min-width: 170px;
+        padding: 20px 16px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .mode-available {
+        border-color: rgba(56, 182, 255, 0.5);
+        background: rgba(56, 182, 255, 0.08);
+        box-shadow: 0 0 26px rgba(56, 182, 255, 0.16);
+      }
+
+      .mode-available:hover {
+        border-color: var(--blue);
+      }
+
+      .mode-locked {
+        opacity: 0.65;
+        background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.02) 0 8px, transparent 8px 16px);
+      }
+
+      .mode-locked .btn:disabled {
+        border-style: dashed;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .mode-name {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 0.5px;
+      }
+
+      .mode-locked .mode-name {
+        color: var(--muted);
+      }
+
+      .mode-name .lock {
+        font-size: 13px;
+      }
+
+      .mode-desc {
+        margin: 0;
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.4;
+        min-height: 36px;
+      }
+
+      .setting {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin: 12px 0;
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      .setting input[type='range'] {
+        width: 140px;
+        accent-color: var(--blue);
+      }
+
+      .setting select {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 14px;
+      }
+
+      .setting input[type='checkbox'] {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--blue);
+        cursor: pointer;
+      }
+
+      .controls-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 18px;
+        font-size: 14px;
+      }
+
+      .controls-table td {
+        padding: 9px 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        text-align: left;
+      }
+
+      .controls-table td:first-child {
+        color: var(--muted);
+      }
+
+      .controls-table td:last-child {
+        text-align: right;
+      }
+
+      kbd {
+        display: inline-block;
+        padding: 3px 8px;
+        margin: 0 2px;
+        font-family: inherit;
+        font-size: 12px;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;
+        border-radius: 5px;
+      }
+
+      .gameover-title {
+        color: var(--red) !important;
+        font-size: 38px !important;
+      }
+
+      .gameover-text {
+        margin: 0 0 20px;
+        font-size: 16px;
+        color: var(--muted);
+      }
+
+      .gameover-text strong {
+        color: var(--gold);
+        font-size: 20px;
+      }
+
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        z-index: 10;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      .hud-panel {
+        display: inline-flex;
+        align-items: center;
+        gap: 22px;
+        padding: 10px 16px;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        flex-wrap: wrap;
+        max-width: calc(100vw - 24px);
+      }
+
+      .hud-stat {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.25;
+        position: relative;
+      }
+
+      .hud-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: var(--muted);
+      }
+
+      .hud-value {
+        font-size: 17px;
+        font-weight: 700;
+      }
+
+      .hud-value.gold {
+        color: var(--gold);
+      }
+
+      .hud-value.wave {
+        color: var(--pink);
+      }
+
+      .hud-value.units {
+        color: var(--blue);
+      }
+
+      .wave-status {
+        display: block;
+        font-size: 10px;
+        color: var(--green);
+      }
+
+      .gold-gain {
+        position: absolute;
+        top: -4px;
+        right: -12px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--gold);
+        opacity: 0;
+      }
+
+      .gold-gain.gain {
+        animation: gain-up 0.9s ease-out;
+      }
+
+      @keyframes gain-up {
+        0% {
+          opacity: 1;
+          transform: translateY(0);
+        }
+        100% {
+          opacity: 0;
+          transform: translateY(-14px);
+        }
+      }
+
+      .base-bar-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .base-bar {
+        width: 160px;
+        height: 10px;
+        background: rgba(0, 0, 0, 0.5);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+
+      .base-fill {
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(90deg, #2bb673, var(--green));
+        border-radius: 5px;
+        transition: width 0.2s ease;
+      }
+
+      .base-hp {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--green);
+        min-width: 44px;
+        text-align: right;
+      }
+
+      .cart-bar .cart-fill {
+        background: linear-gradient(90deg, #b8860b, var(--gold));
+      }
+
+      .cart-hp {
+        color: var(--gold);
+      }
+
+      .boss-bar-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 320px;
+      }
+
+      .boss-name {
+        font-size: 12px;
+        font-weight: 800;
+        color: #ff4655;
+        text-shadow: 0 0 8px rgba(255, 70, 85, 0.8);
+        white-space: nowrap;
+      }
+
+      .boss-bar {
+        flex: 1;
+        width: 240px;
+        height: 14px;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid rgba(255, 70, 85, 0.7);
+        border-radius: 7px;
+        overflow: hidden;
+        box-shadow: 0 0 12px rgba(255, 70, 85, 0.35);
+      }
+
+      .boss-fill {
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(90deg, #7a1120, #ff4655);
+        border-radius: 7px;
+        transition: width 0.15s ease;
+      }
+
+      .boss-hp {
+        font-size: 13px;
+        font-weight: 700;
+        color: #ff4655;
+        min-width: 44px;
+        text-align: right;
+      }
+
+      #tutorial {
+        position: fixed;
+        bottom: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        max-width: 640px;
+        padding: 12px 16px;
+        background: rgba(0, 0, 0, 0.78);
+        border: 1px solid rgba(255, 209, 102, 0.4);
+        border-radius: 10px;
+        font-size: 14px;
+        line-height: 1.4;
+        color: var(--text);
+        z-index: 11;
+        pointer-events: auto;
+      }
+
+      #tutorial #tutorialText {
+        flex: 1;
+      }
+
+      #tutorialClose {
+        flex: none;
+        width: 26px;
+        height: 26px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1;
+      }
+
+      #tutorialClose:hover {
+        color: var(--text);
+        border-color: var(--gold);
+      }
+
+      .story-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-bottom: 18px;
+        justify-content: center;
+      }
+
+      .modes-hint {
+        margin: -6px 0 16px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .story-card {
+        flex: 0 1 200px;
+        min-width: 170px;
+        padding: 16px 14px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .story-card .btn {
+        margin-top: auto;
+      }
+
+      .story-card.story-available {
+        border-color: rgba(255, 209, 102, 0.5);
+        background: rgba(255, 209, 102, 0.07);
+        box-shadow: 0 0 26px rgba(255, 209, 102, 0.14);
+      }
+
+      .story-card.story-available:hover {
+        border-color: var(--gold);
+      }
+
+      .story-card.story-completed {
+        border-color: rgba(80, 200, 120, 0.55);
+        background: rgba(80, 200, 120, 0.08);
+        box-shadow: 0 0 26px rgba(80, 200, 120, 0.12);
+      }
+
+      .story-card.story-locked {
+        opacity: 0.62;
+        filter: grayscale(0.4);
+      }
+
+      .story-card.story-locked .btn {
+        pointer-events: none;
+      }
+
+      .story-card h3 {
+        margin: 0;
+        font-size: 16px;
+        color: var(--gold);
+      }
+
+      .story-card p {
+        margin: 0;
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+
+      .story-card .lock {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .state-badge {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        display: inline-block;
+      }
+
+      .state-badge.state-completed {
+        color: var(--green);
+        background: rgba(80, 200, 120, 0.14);
+        border: 1px solid rgba(80, 200, 120, 0.4);
+      }
+
+      .state-badge.state-available {
+        color: var(--gold);
+        background: rgba(255, 209, 102, 0.12);
+        border: 1px solid rgba(255, 209, 102, 0.4);
+      }
+
+      .state-badge.state-locked {
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+      }
+
+      .stars {
+        font-size: 18px;
+        letter-spacing: 2px;
+      }
+
+      .stars-dim {
+        opacity: 0.25;
+      }
+
+      .result-stars {
+        font-size: 34px;
+        letter-spacing: 6px;
+        margin: 6px 0 14px;
+      }
+
+      .story-win-unlock {
+        margin: 0 0 18px;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--gold);
+      }
+
+      .phase-intro-name {
+        margin: 0 0 8px;
+        font-size: 22px;
+        color: var(--gold);
+      }
+
+      .phase-intro-desc {
+        margin: 0 0 24px;
+        font-size: 14px;
+        color: var(--muted);
+        line-height: 1.6;
+        max-width: 420px;
+      }
+
+      .story-teaser-narration {
+        margin: 0 0 18px;
+        font-size: 14px;
+        color: var(--muted);
+        line-height: 1.7;
+        max-width: 420px;
+      }
+
+      .story-teaser-narration p {
+        margin: 0 0 6px;
+      }
+
+      .story-teaser-unlock {
+        margin: 0 0 18px;
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--gold);
+      }
+
+      .campaign-banner {
+        margin: 0 0 14px;
+        padding: 10px 14px;
+        border: 1px solid rgba(255, 70, 85, 0.5);
+        border-radius: 8px;
+        background: rgba(255, 70, 85, 0.08);
+        font-size: 14px;
+        color: #ff6b7a;
+      }
+
+      .campaign-complete-narration {
+        margin: 0 0 20px;
+        font-size: 15px;
+        line-height: 1.8;
+        color: var(--muted);
+        max-width: 460px;
+      }
+
+      .campaign-complete-narration p {
+        margin: 0 0 6px;
+      }
+
+      .campaign-complete-narration p:last-child {
+        font-weight: 700;
+        color: var(--gold);
+        letter-spacing: 0.4px;
+      }
+
+      .checklist {
+        margin: 0 0 20px;
+        padding: 0;
+        list-style: none;
+        text-align: left;
+        font-size: 15px;
+        line-height: 2;
+        color: var(--text);
+      }
+
+      .checklist li::before {
+        content: '✓ ';
+        color: var(--green);
+        font-weight: 700;
+      }
+
+      .army-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .army-rows {
+        display: flex;
+        gap: 6px;
+      }
+
+      .army-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1px;
+        padding: 4px 7px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--text);
+        font-size: 10px;
+        line-height: 1.15;
+        cursor: pointer;
+        pointer-events: auto;
+        min-width: 58px;
+      }
+
+      .army-btn:hover:not(:disabled) {
+        border-color: var(--blue);
+        background: rgba(56, 182, 255, 0.12);
+      }
+
+      .army-btn kbd {
+        padding: 1px 5px;
+        font-size: 10px;
+      }
+
+      .army-btn b {
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      .army-btn .army-cost {
+        color: var(--gold);
+        font-weight: 700;
+      }
+
+      .hud-fps {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        padding: 4px 10px;
+        background: rgba(0, 0, 0, 0.45);
+        border-radius: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        pointer-events: none;
+        user-select: none;
+      }
+
+      #prep {
+        position: fixed;
+        top: 76px;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      #prep .banner {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--gold);
+        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+      }
+
+      #prep .countdown {
+        font-size: 16px;
+        margin-top: 2px;
+        color: var(--pink);
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+      }
+
+      #prep .start-wave {
+        margin-top: 10px;
+        width: auto;
+        display: inline-block;
+        pointer-events: auto;
+      }
+
+      #upgrades {
+        position: fixed;
+        top: 116px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 10px;
+        z-index: 10;
+      }
+
+      #upgrades .upgrade-btn {
+        padding: 10px 16px;
+        min-width: 150px;
+        border: none;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.65);
+        color: var(--text);
+        font-size: 13px;
+        cursor: pointer;
+        text-align: center;
+        line-height: 1.4;
+        pointer-events: auto;
+        transition: background 0.15s ease, outline 0.15s ease;
+      }
+
+      #upgrades .upgrade-btn:hover {
+        background: rgba(56, 182, 255, 0.35);
+        outline: 1px solid var(--blue);
+      }
+
+      #upgrades .upgrade-btn small {
+        display: block;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      /* ---------- POLISH 1: feedback, legibility, quality of life ---------- */
+
+      .screen {
+        animation: screen-in 0.16s ease;
+      }
+
+      @keyframes screen-in {
+        from {
+          opacity: 0;
+          transform: scale(0.985);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      .btn:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
+      }
+
+      .mode-card,
+      .story-card {
+        transition: transform 0.12s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .mode-available:hover,
+      .story-available:hover {
+        transform: translateY(-2px);
+      }
+
+      .wave-status.prep {
+        color: #ffb04d;
+      }
+
+      .wave-status.battle {
+        color: var(--green);
+        animation: wave-pulse 1.4s ease-in-out infinite;
+      }
+
+      @keyframes wave-pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.45;
+        }
+      }
+
+      .hud-value.gold.insufficient {
+        animation: gold-flash 0.5s ease;
+        color: var(--red);
+      }
+
+      @keyframes gold-flash {
+        0% {
+          color: var(--red);
+        }
+        100% {
+          color: var(--gold);
+        }
+      }
+
+      .base-fill.warn {
+        background: linear-gradient(90deg, #e0a73e, var(--gold));
+      }
+
+      .base-fill.crit {
+        background: linear-gradient(90deg, #d9363e, var(--red));
+      }
+
+      .army-count {
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      #toast {
+        position: fixed;
+        top: 150px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 30;
+        padding: 9px 20px;
+        border-radius: 9px;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        color: var(--text);
+        background: rgba(10, 14, 19, 0.92);
+        border: 1px solid var(--border);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+        pointer-events: none;
+        user-select: none;
+        opacity: 0;
+        transition: opacity 0.18s ease;
+        text-align: center;
+        white-space: nowrap;
+      }
+
+      #toast.show {
+        opacity: 1;
+      }
+
+      #toast.info {
+        border-color: rgba(56, 182, 255, 0.55);
+        color: var(--blue-bright);
+      }
+
+      #toast.success {
+        border-color: rgba(61, 220, 132, 0.55);
+        color: var(--green);
+      }
+
+      #toast.alert {
+        border-color: rgba(255, 70, 85, 0.6);
+        color: var(--pink);
+      }
+
+      #prep .countdown {
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        gap: 4px;
+        font-size: 15px;
+        margin-top: 2px;
+        color: var(--pink);
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+      }
+
+      #prep .cd-secs {
+        font-size: 26px;
+        font-weight: 800;
+        display: inline-block;
+        min-width: 28px;
+        text-align: center;
+      }
+
+      #prep .countdown.warn .cd-secs {
+        color: var(--red);
+        animation: cd-pulse 0.9s ease-in-out infinite;
+      }
+
+      @keyframes cd-pulse {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.18);
+        }
+      }
+
+      #prep .start-wave.warn {
+        animation: btn-glow 0.9s ease-in-out infinite;
+      }
+
+      @keyframes btn-glow {
+        0%,
+        100% {
+          box-shadow: 0 0 10px rgba(255, 209, 102, 0.25);
+        }
+        50% {
+          box-shadow: 0 0 26px rgba(255, 209, 102, 0.55);
+        }
+      }
+
+      .setting input[type='checkbox'] {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 42px;
+        height: 22px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid var(--border);
+        position: relative;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+
+      .setting input[type='checkbox']::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #cfd8e0;
+        transition: transform 0.15s ease, background 0.15s ease;
+      }
+
+      .setting input[type='checkbox']:checked {
+        background: rgba(56, 182, 255, 0.55);
+        border-color: var(--blue);
+      }
+
+      .setting input[type='checkbox']:checked::after {
+        transform: translateX(20px);
+        background: #fff;
+      }
+
+      .setting input[type='range'] {
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="hud" hidden>
+      <div class="hud-panel">
+        <div class="hud-stat" id="stat-gold">
+          <span class="hud-label">💰 Ouro</span>
+          <span class="hud-value gold" id="gold">0</span>
+          <span class="gold-gain" id="goldGain"></span>
+        </div>
+        <div class="hud-stat" id="stat-wave">
+          <span class="hud-label">🌊 Wave</span>
+          <span class="hud-value wave" id="wave">0</span>
+          <span class="wave-status" id="waveStatus"></span>
+        </div>
+        <div class="hud-stat" id="stat-troops">
+          <span class="hud-label">🪖 Tropas</span>
+          <span class="hud-value units" id="units">0</span>
+        </div>
+        <div class="hud-stat army-panel" id="stat-army">
+          <span class="hud-label">Exército</span>
+          <div class="army-rows">
+            <button class="army-btn" id="army-knight" title="Cavaleiros"><kbd>E</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
+            <button class="army-btn" id="army-archer" title="Arqueiros"><kbd>F</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
+            <button class="army-btn" id="army-tank" title="Tanques"><kbd>C</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
+            <button class="army-btn" id="army-champion" title="Campeões"><kbd>G</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
+          </div>
+        </div>
+        <div class="base-bar-wrap" id="stat-base">
+          <span class="hud-label">🏰 Castelo</span>
+          <div class="base-bar"><div class="base-fill" id="baseFill"></div></div>
+          <span class="base-hp" id="baseHp">100%</span>
+        </div>
+        <div class="base-bar-wrap" id="stat-cart" hidden>
+          <span class="hud-label">🚚 Carroça</span>
+          <div class="base-bar cart-bar"><div class="base-fill cart-fill" id="cartFill"></div></div>
+          <span class="base-hp cart-hp" id="cartHp">0/0</span>
+        </div>
+        <div class="boss-bar-wrap" id="bossBar" hidden>
+          <span class="boss-name" id="bossName">SENHOR DA RUÍNA</span>
+          <div class="boss-bar"><div class="boss-fill" id="bossFill"></div></div>
+          <span class="boss-hp" id="bossHp">100%</span>
+        </div>
+      </div>
+      <div id="tutorial" hidden>
+        <span id="tutorialText"></span>
+        <button id="tutorialClose" title="Fechar">✕</button>
+      </div>
+      <div id="prep" hidden>
+        <div class="banner" id="prepBanner">PREPARAÇÃO</div>
+        <div class="countdown" id="prepCountdown"><span class="cd-label">PRÓXIMA WAVE EM</span><span class="cd-secs" id="prepSecs">30</span><span class="cd-unit">s</span></div>
+        <button class="btn btn-primary start-wave" id="btn-start-wave">Começar agora</button>
+      </div>
+      <div id="upgrades"></div>
+    </div>
+    <div class="hud-fps" id="fps" hidden></div>
+    <div id="toast"></div>
+
+    <div id="menu" class="screen">
+      <div class="panel">
+        <h1 class="title">Niko<span class="title-accent">Light</span></h1>
+        <p class="subtitle">Estratégia em tempo real</p>
+        <button class="btn btn-primary" id="btn-play">Jogar</button>
+        <button class="btn" id="btn-controls">Controles</button>
+        <button class="btn" id="btn-settings">Configurações</button>
+      </div>
+    </div>
+
+    <div id="modes" class="screen" hidden>
+      <div class="panel">
+        <h2>Modo de jogo</h2>
+        <div class="modes-grid">
+          <div class="mode-card mode-available">
+            <h3 class="mode-name">Infinito</h3>
+            <p class="mode-desc">Sobreviva o máximo possível às waves.</p>
+            <button class="btn btn-primary" id="btn-mode-infinite">Jogar</button>
+          </div>
+          <div class="mode-card mode-available">
+            <h3 class="mode-name">História</h3>
+            <p class="mode-desc">Campanha narrativa. Fase 1 disponível.</p>
+            <button class="btn btn-primary" id="btn-mode-story">Jogar</button>
+          </div>
+          <div class="mode-card mode-locked">
+            <h3 class="mode-name">Aventuras <span class="lock">🔒</span></h3>
+            <p class="mode-desc">Desafios, cenários especiais e modos alternativos.</p>
+            <button class="btn" disabled>Coming Soon</button>
+          </div>
+        </div>
+        <button class="btn" id="btn-modes-back">Voltar</button>
+      </div>
+    </div>
+
+    <div id="pause" class="screen" hidden>
+      <div class="panel">
+        <h2>Pausa</h2>
+        <button class="btn btn-primary" id="btn-resume">Continuar</button>
+        <button class="btn" id="btn-pause-controls">Controles</button>
+        <button class="btn" id="btn-pause-settings">Configurações</button>
+        <button class="btn btn-danger" id="btn-pause-menu">Menu principal</button>
+      </div>
+    </div>
+
+    <div id="settings" class="screen" hidden>
+      <div class="panel">
+        <h2>Configurações</h2>
+        <div class="setting">
+          <span>Música</span>
+          <input type="checkbox" id="set-music" />
+        </div>
+        <div class="setting">
+          <span>Efeitos sonoros</span>
+          <input type="checkbox" id="set-sfx" />
+        </div>
+        <div class="setting">
+          <span>Mostrar FPS</span>
+          <input type="checkbox" id="set-fps" />
+        </div>
+        <div class="setting">
+          <span>Volume da música</span>
+          <input type="range" id="set-music-vol" min="0" max="100" />
+        </div>
+        <div class="setting">
+          <span>Volume dos efeitos</span>
+          <input type="range" id="set-sfx-vol" min="0" max="100" />
+        </div>
+        <div class="setting">
+          <span>Volume da interface</span>
+          <input type="range" id="set-iface-vol" min="0" max="100" />
+        </div>
+        <div class="setting">
+          <span>Som ambiente</span>
+          <input type="checkbox" id="set-ambient" />
+        </div>
+        <div class="setting">
+          <span>Volume do ambiente</span>
+          <input type="range" id="set-amb-vol" min="0" max="100" />
+        </div>
+        <div class="setting">
+          <span>Limite de tropas</span>
+          <select id="set-units">
+            <option value="200">200</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="btn-settings-back">Voltar</button>
+      </div>
+    </div>
+
+    <div id="controls" class="screen" hidden>
+      <div class="panel">
+        <h2>Controles</h2>
+        <table class="controls-table">
+          <tr><td>Selecionar unidade / grupo</td><td><kbd>Clique esquerdo</kbd></td></tr>
+          <tr><td>Selecionar retângulo</td><td><kbd>Arrastar</kbd></td></tr>
+          <tr><td>Mover tropas selecionadas</td><td><kbd>Clique direito</kbd></td></tr>
+          <tr><td>Recrutar cavaleiros</td><td><kbd>E</kbd></td></tr>
+          <tr><td>Recrutar arqueiros</td><td><kbd>F</kbd></td></tr>
+          <tr><td>Recrutar tanques</td><td><kbd>C</kbd></td></tr>
+          <tr><td>Recrutar campeão</td><td><kbd>G</kbd></td></tr>
+          <tr><td>Formação em linha</td><td><kbd>L</kbd></td></tr>
+          <tr><td>Formação em V</td><td><kbd>V</kbd></td></tr>
+          <tr><td>Formação quadrada</td><td><kbd>Q</kbd></td></tr>
+          <tr><td>Formação defensiva</td><td><kbd>B</kbd></td></tr>
+          <tr><td>Começar wave</td><td><kbd>Botão no HUD</kbd></td></tr>
+          <tr><td>Mover câmera</td><td><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></td></tr>
+          <tr><td>Zoom</td><td><kbd>Roda do mouse</kbd></td></tr>
+          <tr><td>Pausar</td><td><kbd>Esc</kbd></td></tr>
+        </table>
+        <button class="btn btn-primary" id="btn-controls-back">Voltar</button>
+      </div>
+    </div>
+
+    <div id="gameover" class="screen" hidden>
+      <div class="panel">
+        <h2 class="gameover-title">Fim de jogo</h2>
+        <p class="gameover-text">
+          Você sobreviveu até a wave <strong id="finalWave">0</strong>
+        </p>
+        <button class="btn btn-primary" id="btn-retry">Tentar novamente</button>
+        <button class="btn" id="btn-gameover-menu">Menu principal</button>
+      </div>
+    </div>
+
+    <div id="storyselect" class="screen" hidden>
+      <div class="panel">
+        <h2>História</h2>
+        <p class="modes-hint">Conclua uma fase para desbloquear a próxima.</p>
+        <div class="campaign-banner" id="campaignBanner" hidden>
+          🏆 <strong>Campanha concluída!</strong> O Senhor da Ruína foi derrotado.
+        </div>
+        <div class="story-grid" id="storyGrid"></div>
+        <button class="btn" id="btn-story-back">Voltar</button>
+      </div>
+    </div>
+
+    <div id="phaseintro" class="screen" hidden>
+      <div class="panel">
+        <h2 id="phaseIntroTitle">Fase</h2>
+        <h3 class="phase-intro-name" id="phaseIntroName"></h3>
+        <p class="phase-intro-desc" id="phaseIntroDesc"></p>
+        <button class="btn btn-primary" id="btn-phase-intro">Continuar</button>
+      </div>
+    </div>
+
+    <div id="storywin" class="screen" hidden>
+      <div class="panel">
+        <h2 id="storyWinTitle">Fase Concluída</h2>
+        <div class="result-stars" id="storyWinStars"></div>
+        <ul class="checklist" id="storyWinText"></ul>
+        <p class="story-win-unlock" id="storyWinUnlock" hidden></p>
+        <button class="btn btn-primary" id="btn-story-win-continue">Continuar</button>
+        <button class="btn" id="btn-story-win-retry">Repetir fase</button>
+        <button class="btn" id="btn-story-win-select">Seleção de fases</button>
+        <button class="btn" id="btn-story-win-menu">Menu principal</button>
+      </div>
+    </div>
+
+    <div id="storyteaser" class="screen" hidden>
+      <div class="panel">
+        <h2 id="storyTeaserTitle">Fase Concluída</h2>
+        <div class="result-stars" id="storyTeaserStars"></div>
+        <div class="story-teaser-narration" id="storyTeaserNarration"></div>
+        <p class="story-teaser-unlock" id="storyTeaserUnlock"></p>
+        <button class="btn btn-primary" id="btn-story-teaser-continue">Continuar</button>
+        <button class="btn" id="btn-story-teaser-menu">Menu principal</button>
+      </div>
+    </div>
+
+    <div id="campaigncomplete" class="screen" hidden>
+      <div class="panel">
+        <h2 id="campaignCompleteTitle">SENHOR DA RUÍNA DERROTADO</h2>
+        <div class="result-stars" id="campaignCompleteStars"></div>
+        <div class="campaign-complete-narration" id="campaignCompleteNarration"></div>
+        <button class="btn btn-primary" id="btn-campaign-continue">Continuar</button>
+        <button class="btn" id="btn-campaign-menu">Menu principal</button>
+      </div>
+    </div>
+
+    <div id="storylose" class="screen" hidden>
+      <div class="panel">
+        <h2 class="gameover-title">Derrota</h2>
+        <p class="gameover-text" id="storyLoseText"></p>
+        <button class="btn btn-primary" id="btn-story-lose-retry">Tentar novamente</button>
+        <button class="btn" id="btn-story-lose-menu">Menu principal</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
