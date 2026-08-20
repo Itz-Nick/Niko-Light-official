@@ -5,6 +5,15 @@ import { CONFIG } from '../config';
 import type { Projectile } from '../combat/projectile';
 import type { Structure } from '../entities/structures';
 import type { Unit } from '../entities/unit';
+import type { AdventureRenderData } from '../adventure/adventure';
+import {
+  CONTINENT_BACK_BUTTON,
+  CONTINENT_DESIGN_H,
+  CONTINENT_DESIGN_W,
+  continentTransform,
+  regionScreenRect,
+  type ContinentView,
+} from '../adventure/continent';
 
 interface DragRect {
   x: number;
@@ -12,6 +21,8 @@ interface DragRect {
   w: number;
   h: number;
 }
+
+const EMPTY_SELECTED: ReadonlySet<Unit> = new Set<Unit>();
 
 export interface WorldMarker {
   x: number;
@@ -26,9 +37,204 @@ export interface RenderOverlay {
   alpha: number;
   title: string;
   subtitle: string;
+  progress: number;
+  tint: string;
+  icon: string;
 }
 
+export interface BuildPreview {
+  x: number;
+  y: number;
+  kind: 'house' | 'market' | 'tower';
+  valid: boolean;
+}
+
+export interface CreativeGhost {
+  x: number;
+  y: number;
+  valid: boolean;
+  team: 'blue' | 'red';
+  unit: boolean;
+  size: number;
+  w: number;
+  h: number;
+}
+
+export interface CreativeSelected {
+  x: number;
+  y: number;
+  r: number;
+  color: string;
+  unit: boolean;
+}
+
+export interface CreativeEditorView {
+  phase: 'prep' | 'countdown' | 'battle';
+  countdown: number;
+  ghost: CreativeGhost | null;
+  selected: CreativeSelected | null;
+  flash?: number;
+}
+
+export type MenuVariant = 'menu' | 'modes' | 'story' | 'creative';
+
+interface MenuParticle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  life: number;
+  rate: number;
+  phase: number;
+  hue: number;
+  depth: number;
+}
+
+interface MenuOrb {
+  x: number;
+  y: number;
+  r: number;
+  vx: number;
+  vy: number;
+  hue: number;
+  depth: number;
+  phase: number;
+}
+
+interface MenuGear {
+  x: number;
+  y: number;
+  r: number;
+  spin: number;
+  speed: number;
+  hue: number;
+  depth: number;
+}
+
+interface ContinentParticle {
+  x: number;
+  y: number;
+  size: number;
+  speed: number;
+  drift: number;
+  phase: number;
+  alpha: number;
+  glow: boolean;
+}
+
+interface ContinentTwinkle {
+  x: number;
+  y: number;
+  phase: number;
+}
+
+const CONTINENT_RIVER: { x: number; y: number }[] = [
+  { x: 760, y: 118 },
+  { x: 730, y: 198 },
+  { x: 644, y: 288 },
+  { x: 562, y: 378 },
+  { x: 505, y: 468 },
+  { x: 470, y: 553 },
+  { x: 490, y: 638 },
+  { x: 560, y: 708 },
+  { x: 600, y: 790 },
+];
+
+const CONTINENT_ROAD: { x: number; y: number }[] = [
+  { x: 255, y: 525 },
+  { x: 410, y: 430 },
+  { x: 560, y: 330 },
+  { x: 700, y: 220 },
+  { x: 785, y: 340 },
+  { x: 855, y: 530 },
+];
+
+const ROAD_INDEX: Record<number, number> = { 1: 0, 2: 3, 3: 5 };
+
 const BG_SCALE = 0.2;
+const HUE_CYCLE: readonly number[] = [355, 25, 46, 355, 285, 355];
+const HUE_PERIOD = 22;
+
+function menuHue(t: number): number {
+  const u = (t % HUE_PERIOD) / HUE_PERIOD;
+  const seg = u * (HUE_CYCLE.length - 1);
+  const i = Math.min(HUE_CYCLE.length - 2, Math.floor(seg));
+  const f = seg - i;
+  return (HUE_CYCLE[i] + (HUE_CYCLE[i + 1] - HUE_CYCLE[i]) * f) % 360;
+}
+
+function easeOut(t: number): number {
+  return 1 - (1 - t) * (1 - t) * (1 - t);
+}
+
+function star5(ctx: CanvasRenderingContext2D, cx: number, cy: number, outer: number, inner: number): void {
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const aOut = (i * 2 * Math.PI) / 5 - Math.PI / 2;
+    const aIn = aOut + Math.PI / 5;
+    if (i === 0) ctx.moveTo(cx + Math.cos(aOut) * outer, cy + Math.sin(aOut) * outer);
+    else ctx.lineTo(cx + Math.cos(aOut) * outer, cy + Math.sin(aOut) * outer);
+    ctx.lineTo(cx + Math.cos(aIn) * inner, cy + Math.sin(aIn) * inner);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function blobPoints(
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  n: number,
+  jitter: number,
+  rand: () => number,
+  rot = 0,
+): { x: number; y: number }[] {
+  const pts: { x: number; y: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = rot + (i / n) * Math.PI * 2;
+    const rr = 1 + (rand() - 0.5) * jitter;
+    pts.push({ x: cx + Math.cos(a) * rx * rr, y: cy + Math.sin(a) * ry * rr });
+  }
+  return pts;
+}
+
+function scalePoly(pts: { x: number; y: number }[], cx: number, cy: number, k: number): { x: number; y: number }[] {
+  return pts.map((p) => ({ x: cx + (p.x - cx) * k, y: cy + (p.y - cy) * k }));
+}
+
+function polyPath(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]): void {
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    if (i === 0) ctx.moveTo(pts[i].x, pts[i].y);
+    else ctx.lineTo(pts[i].x, pts[i].y);
+  }
+  ctx.closePath();
+}
+
+function traceCurve(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]): void {
+  if (pts.length === 0) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i].x + pts[i + 1].x) / 2;
+    const my = (pts[i].y + pts[i + 1].y) / 2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+  }
+  const last = pts[pts.length - 1];
+  ctx.lineTo(last.x, last.y);
+}
 
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D;
@@ -37,9 +243,31 @@ export class Renderer {
   private dpr = 1;
   private bgCanvas: HTMLCanvasElement | null = null;
   private bgBiome: BiomeId | null = null;
+  private continentBg: HTMLCanvasElement | null = null;
+  private menuTime = 0;
+  private menuVariant: MenuVariant | null = null;
+  private menuParticles: MenuParticle[] = [];
+  private menuOrbs: MenuOrb[] = [];
+  private menuGears: MenuGear[] = [];
+  private menuMouseX = 0.5;
+  private menuMouseY = 0.5;
+  private fogTime = 0;
+  private continentFog: HTMLCanvasElement | null = null;
+  private fogKey = '';
+  private twinkleKey = '';
+  private continentParticles: ContinentParticle[] = [];
+  private continentTwinkles: ContinentTwinkle[] = [];
+  private continentReveal = new Map<number, number>();
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width > 0) {
+        this.menuMouseX = (e.clientX - rect.left) / rect.width;
+        this.menuMouseY = (e.clientY - rect.top) / rect.height;
+      }
+    });
   }
 
   resize(width: number, height: number, dpr: number): void {
@@ -64,6 +292,8 @@ export class Renderer {
     projectiles: Projectile[] = [],
     route: { x: number; y: number }[] | null = null,
     cart: Structure | null = null,
+    adventure: AdventureRenderData | null = null,
+    buildPreview: BuildPreview | null = null,
   ): void {
     const { ctx } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -74,22 +304,1067 @@ export class Renderer {
     ctx.scale(camera.zoom, camera.zoom);
     ctx.translate(-camera.x, -camera.y);
 
-    this.drawBiomeBackground(biome);
-    this.drawGrid(camera, biome);
+    if (adventure) {
+      this.fogTime += 0.016;
+      this.drawAdventureBackground(adventure);
+      this.drawTerritoryLabels(adventure);
+      this.drawFog(adventure);
+    } else {
+      this.drawBiomeBackground(biome);
+      this.drawGrid(camera, biome);
+    }
     this.drawRoad(route);
     for (const s of structures) {
       if (s.alive) this.drawStructure(s);
       else this.drawRubble(s);
     }
+    if (adventure) this.drawAdventureObjective(adventure);
     this.drawCart(cart);
     this.drawUnits(camera, units, selected);
     this.drawProjectiles(projectiles);
     this.drawMarkers(markers);
     this.drawSelectionGroup(selected);
+    if (buildPreview) this.drawBuildPreview(buildPreview);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (dragRect) this.drawSelectionRect(dragRect);
     if (overlay) this.drawOverlay(overlay);
+  }
+
+  renderCreativeEditor(
+    camera: Camera,
+    units: Unit[],
+    structures: Structure[],
+    view: CreativeEditorView,
+    projectiles?: Projectile[],
+    markers?: WorldMarker[],
+  ): void {
+    this.render(camera, units, structures, EMPTY_SELECTED, null, markers ?? [], 'field', null, projectiles ?? [], null, null, null, null);
+    const { ctx } = this;
+    const w = this.width;
+    const h = this.height;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-camera.x, -camera.y);
+
+    if (view.phase === 'prep') {
+      const worldW = CONFIG.world.width;
+      const worldH = CONFIG.world.height;
+      const cx = worldW / 2;
+      const cy = worldH / 2;
+      ctx.fillStyle = 'rgba(56, 182, 255, 0.05)';
+      ctx.fillRect(0, 0, cx, worldH);
+      ctx.fillStyle = 'rgba(255, 70, 85, 0.05)';
+      ctx.fillRect(cx, 0, worldW - cx, worldH);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.fillRect(cx - 90, cy - 90, 180, 180);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cx - 90, cy - 90, 180, 180);
+
+      const st = performance.now() / 1000;
+      ctx.setLineDash([10, 12]);
+      ctx.lineDashOffset = -((st * 18) % 22);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, 0);
+      ctx.lineTo(cx, worldH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.font = 'bold 26px "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(56, 182, 255, 0.8)';
+      ctx.fillText('🔵 AZUL', cx - 210, cy);
+      ctx.fillStyle = 'rgba(255, 70, 85, 0.8)';
+      ctx.fillText('🔴 VERMELHO', cx + 210, cy);
+    }
+
+    if (view.selected) {
+      const s = view.selected;
+      const st = performance.now() / 1000;
+      const pulse = 0.5 + 0.5 * Math.sin(st * 4);
+      const r = s.r + 7 + pulse * 3;
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.font = 'bold 13px "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = s.unit ? 'rgba(56, 182, 255, 0.95)' : 'rgba(255, 209, 102, 0.95)';
+      ctx.fillText(s.unit ? '🪖' : '🏰', s.x, s.y - r - 12);
+    }
+
+    if (view.ghost) {
+      const g = view.ghost;
+      const ok = g.valid;
+      ctx.strokeStyle = ok ? (g.team === 'blue' ? 'rgba(56, 182, 255, 0.9)' : 'rgba(255, 70, 85, 0.9)') : 'rgba(255, 80, 80, 0.9)';
+      ctx.fillStyle = ok ? (g.team === 'blue' ? 'rgba(56, 182, 255, 0.22)' : 'rgba(255, 70, 85, 0.22)') : 'rgba(255, 80, 80, 0.15)';
+      ctx.lineWidth = 2;
+      if (g.unit) {
+        ctx.beginPath();
+        ctx.arc(g.x, g.y, Math.max(10, g.size), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.rect(g.x - g.w / 2, g.y - g.h / 2, g.w, g.h);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    for (const u of units) {
+      if (!u.alive) continue;
+      const rgb = u.team === 'player' ? '56, 182, 255' : '255, 70, 85';
+      const isBoss = u.troopType === 'boss';
+      if (isBoss) {
+        ctx.strokeStyle = `rgba(${rgb}, 0.8)`;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = `rgba(${rgb}, 0.9)`;
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(u.x, u.y, u.radius + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.strokeStyle = `rgba(${rgb}, 0.6)`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(u.x, u.y, u.radius + 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = `rgba(${rgb}, 0.9)`;
+      ctx.beginPath();
+      ctx.moveTo(u.x, u.y - u.radius - (isBoss ? 20 : 16));
+      ctx.lineTo(u.x + 7, u.y - u.radius - (isBoss ? 11 : 8));
+      ctx.lineTo(u.x - 7, u.y - u.radius - (isBoss ? 11 : 8));
+      ctx.closePath();
+      ctx.fill();
+    }
+    for (const s of structures) {
+      if (!s.alive || s.kind === 'wall' || s.kind === 'mine' || s.kind === 'cart') continue;
+      const rgb = s.team === 'player' ? '56, 182, 255' : '255, 70, 85';
+      ctx.strokeStyle = `rgba(${rgb}, 0.55)`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.radius + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(${rgb}, 0.9)`;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y - s.radius - 12);
+      ctx.lineTo(s.x + 6, s.y - s.radius - 6);
+      ctx.lineTo(s.x - 6, s.y - s.radius - 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+    if (view.phase === 'countdown') {
+      const n = Math.max(1, Math.ceil(view.countdown));
+      ctx.fillStyle = 'rgba(6, 9, 14, 0.45)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 130px "Segoe UI", sans-serif';
+      ctx.fillStyle = 'rgba(255, 209, 102, 0.92)';
+      ctx.shadowColor = 'rgba(255, 209, 102, 0.8)';
+      ctx.shadowBlur = 42;
+      ctx.fillText(String(n), w / 2, h / 2);
+      ctx.shadowBlur = 0;
+      ctx.font = 'bold 24px "Segoe UI", sans-serif';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.fillText('PREPARE-SE', w / 2, h / 2 + 96);
+    } else if (view.phase === 'battle' && view.flash && view.flash > 0) {
+      const f = Math.max(0, Math.min(1, view.flash));
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.22 * Math.max(0, f - 0.7)})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const scale = 0.8 + 0.2 * (1 - f);
+      ctx.translate(w / 2, h / 2);
+      ctx.scale(scale, scale);
+      ctx.translate(-w / 2, -h / 2);
+      ctx.font = 'bold 64px "Segoe UI", sans-serif';
+      ctx.fillStyle = `rgba(255, 255, 255, ${f * 0.95})`;
+      ctx.shadowColor = 'rgba(255, 209, 102, 0.9)';
+      ctx.shadowBlur = 30;
+      ctx.fillText('⚔️ BATALHA!', w / 2, h / 2);
+      ctx.shadowBlur = 0;
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    }
+  }
+
+  renderContinent(dt: number, view: ContinentView): void {
+    this.ensureContinentBg();
+    this.ensureContinentParticles();
+    this.fogTime += dt;
+    const { ctx } = this;
+    const w = this.width;
+    const h = this.height;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    const sky = ctx.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, '#081a27');
+    sky.addColorStop(0.6, '#0a2230');
+    sky.addColorStop(1, '#06151f');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h);
+
+    for (const r of view.regions) {
+      if (r.state === 'unknown') {
+        this.continentReveal.delete(r.id);
+      } else {
+        const p = this.continentReveal.get(r.id) ?? 0;
+        if (p < 1) this.continentReveal.set(r.id, Math.min(1, p + dt * 0.55));
+      }
+    }
+
+    const t = continentTransform(w, h);
+    if (this.continentBg) {
+      ctx.drawImage(this.continentBg, t.ox, t.oy, CONTINENT_DESIGN_W * t.scale, CONTINENT_DESIGN_H * t.scale);
+    }
+    this.drawContinentRoads(t, view.regions);
+    for (const r of view.regions) {
+      if (r.state === 'unknown') continue;
+      this.drawContinentRegion(r, t);
+    }
+    this.drawContinentAtmosphere(dt, t, view.regions);
+    this.drawContinentFog(t, view.regions);
+    this.drawContinentVignette();
+    this.drawContinentHeader(view);
+    this.drawContinentBackButton(t);
+  }
+
+  private ensureContinentBg(): void {
+    if (this.continentBg) return;
+    const bg = document.createElement('canvas');
+    bg.width = CONTINENT_DESIGN_W;
+    bg.height = CONTINENT_DESIGN_H;
+    const ctx = bg.getContext('2d')!;
+    const rand = mulberry32(4242);
+    const W = bg.width;
+    const H = bg.height;
+
+    const sea = ctx.createLinearGradient(0, 0, 0, H);
+    sea.addColorStop(0, '#0a2432');
+    sea.addColorStop(0.55, '#0d2c3c');
+    sea.addColorStop(1, '#081d2a');
+    ctx.fillStyle = sea;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = 'rgba(6, 22, 32, 0.55)';
+    for (let i = 0; i < 70; i++) {
+      const x = rand() * W;
+      const y = rand() * H;
+      const r = 26 + rand() * 110;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(40, 80, 96, 0.06)';
+    for (let i = 0; i < 180; i++) {
+      const x = rand() * W;
+      const y = rand() * H;
+      ctx.beginPath();
+      ctx.arc(x, y, rand() * 1.6 + 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const land: [number, number, number, number, number][] = [
+      [560, 400, 470, 330, 0.42],
+      [300, 210, 250, 150, 0.5],
+      [720, 160, 260, 130, 0.45],
+      [880, 400, 220, 260, 0.5],
+      [560, 660, 360, 120, 0.55],
+      [260, 560, 200, 150, 0.5],
+    ];
+
+    ctx.fillStyle = '#0d241d';
+    for (const [cx, cy, rx, ry, j] of land) {
+      polyPath(ctx, blobPoints(cx, cy, rx + 18, ry + 18, 16, j, rand, rand() * 0.4));
+      ctx.fill();
+    }
+    ctx.fillStyle = '#163c2e';
+    for (const [cx, cy, rx, ry, j] of land) {
+      polyPath(ctx, blobPoints(cx, cy, rx, ry, 16, j, rand, rand() * 0.4));
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(38, 82, 60, 0.55)';
+    for (const [cx, cy, rx, ry, j] of land) {
+      polyPath(ctx, blobPoints(cx, cy, rx * 0.9, ry * 0.88, 16, j, rand, rand() * 0.4));
+      ctx.fill();
+    }
+
+    ctx.fillStyle = 'rgba(52, 104, 72, 0.42)';
+    for (let i = 0; i < 26; i++) {
+      polyPath(ctx, blobPoints(120 + rand() * 940, 80 + rand() * 620, 20 + rand() * 50, 14 + rand() * 34, 8, 0.4, rand));
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(8, 26, 18, 0.4)';
+    for (let i = 0; i < 20; i++) {
+      polyPath(ctx, blobPoints(140 + rand() * 900, 100 + rand() * 580, 16 + rand() * 40, 12 + rand() * 26, 8, 0.45, rand));
+      ctx.fill();
+    }
+
+    const forests: [number, number, number][] = [
+      [210, 475, 55],
+      [300, 560, 45],
+      [250, 430, 40],
+      [820, 480, 45],
+      [890, 520, 40],
+      [760, 435, 35],
+      [560, 185, 40],
+      [630, 235, 34],
+      [470, 130, 34],
+    ];
+    for (const [fx, fy, fr] of forests) {
+      const n = 6 + Math.floor(rand() * 5);
+      for (let i = 0; i < n; i++) {
+        const a = rand() * Math.PI * 2;
+        const d = rand() * fr;
+        const tx = fx + Math.cos(a) * d;
+        const ty = fy + Math.sin(a) * d;
+        const s = 5 + rand() * 7;
+        ctx.fillStyle = 'rgba(6, 18, 12, 0.5)';
+        ctx.beginPath();
+        ctx.arc(tx + 1.5, ty + 2.5, s + 1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#12392a';
+        ctx.beginPath();
+        ctx.arc(tx, ty, s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#1e5238';
+        ctx.beginPath();
+        ctx.arc(tx - s * 0.28, ty - s * 0.3, s * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    const ridges: [number, number, number][] = [
+      [620, 130, 140],
+      [360, 108, 95],
+      [900, 175, 74],
+    ];
+    for (const [rx0, ry0, rw] of ridges) {
+      for (let i = 0; i < 6; i++) {
+        const mx = rx0 - rw + (i + 0.5) * ((rw * 2) / 6);
+        const mh = rw * 0.42 * (0.6 + rand() * 0.7);
+        const mw = rw * 0.3;
+        ctx.fillStyle = 'rgba(5, 14, 18, 0.5)';
+        ctx.beginPath();
+        ctx.moveTo(mx - mw, ry0);
+        ctx.lineTo(mx + 3, ry0 - mh);
+        ctx.lineTo(mx + mw + 3, ry0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#5b6a75';
+        ctx.beginPath();
+        ctx.moveTo(mx - mw, ry0);
+        ctx.lineTo(mx, ry0 - mh);
+        ctx.lineTo(mx + mw, ry0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#e8eef2';
+        ctx.beginPath();
+        ctx.moveTo(mx - mw * 0.28, ry0 - mh * 0.7);
+        ctx.lineTo(mx, ry0 - mh);
+        ctx.lineTo(mx + mw * 0.28, ry0 - mh * 0.7);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    const lake = blobPoints(430, 556, 62, 44, 12, 0.32, rand);
+    ctx.fillStyle = 'rgba(122, 102, 66, 0.3)';
+    polyPath(ctx, scalePoly(lake, 430, 556, 1.16));
+    ctx.fill();
+    ctx.fillStyle = '#123f4d';
+    polyPath(ctx, lake);
+    ctx.fill();
+    ctx.fillStyle = '#1c5a6e';
+    polyPath(ctx, scalePoly(lake, 430, 556, 0.66));
+    ctx.fill();
+    ctx.fillStyle = 'rgba(150, 214, 234, 0.16)';
+    polyPath(ctx, scalePoly(lake, 430, 556, 0.4));
+    ctx.fill();
+
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(122, 102, 66, 0.3)';
+    ctx.lineWidth = 16;
+    traceCurve(ctx, CONTINENT_RIVER);
+    ctx.stroke();
+    ctx.strokeStyle = '#123f4d';
+    ctx.lineWidth = 10;
+    traceCurve(ctx, CONTINENT_RIVER);
+    ctx.stroke();
+    ctx.strokeStyle = '#1c5a6e';
+    ctx.lineWidth = 5;
+    traceCurve(ctx, CONTINENT_RIVER);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(96, 76, 50, 0.24)';
+    ctx.lineWidth = 8;
+    traceCurve(ctx, CONTINENT_ROAD);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(150, 124, 84, 0.14)';
+    ctx.lineWidth = 3.4;
+    traceCurve(ctx, CONTINENT_ROAD);
+    ctx.stroke();
+
+    this.continentBg = bg;
+  }
+
+  private ensureContinentParticles(): void {
+    if (this.continentParticles.length > 0) return;
+    const rand = mulberry32(999);
+    for (let i = 0; i < 38; i++) {
+      this.continentParticles.push({
+        x: rand() * CONTINENT_DESIGN_W,
+        y: rand() * CONTINENT_DESIGN_H,
+        size: 0.7 + rand() * 1.7,
+        speed: 3.5 + rand() * 8,
+        drift: (rand() - 0.5) * 9,
+        phase: rand() * Math.PI * 2,
+        alpha: 0.12 + rand() * 0.24,
+        glow: rand() < 0.24,
+      });
+    }
+  }
+
+  private drawContinentRoads(t: { scale: number; ox: number; oy: number }, regions: ContinentView['regions']): void {
+    const known = regions
+      .filter((r) => r.state !== 'unknown' && r.phase !== null)
+      .sort((a, b) => (a.phase as number) - (b.phase as number));
+    const { ctx } = this;
+    for (let i = 0; i < known.length - 1; i++) {
+      const ia = ROAD_INDEX[known[i].phase as number];
+      const ib = ROAD_INDEX[known[i + 1].phase as number];
+      if (ia === undefined || ib === undefined) continue;
+      const seg = CONTINENT_ROAD.slice(Math.min(ia, ib), Math.max(ia, ib) + 1).map((p) => ({
+        x: t.ox + p.x * t.scale,
+        y: t.oy + p.y * t.scale,
+      }));
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(255, 214, 150, 0.08)';
+      ctx.lineWidth = 14 * t.scale;
+      traceCurve(ctx, seg);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(96, 74, 48, 0.78)';
+      ctx.lineWidth = 7 * t.scale;
+      traceCurve(ctx, seg);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(140, 110, 72, 0.5)';
+      ctx.lineWidth = 3.4 * t.scale;
+      traceCurve(ctx, seg);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255, 226, 178, 0.3)';
+      ctx.lineWidth = 1.3 * t.scale;
+      ctx.setLineDash([4 * t.scale, 9 * t.scale]);
+      ctx.lineDashOffset = -this.fogTime * 16 * t.scale;
+      traceCurve(ctx, seg);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      this.drawRoadNode(seg[0], i === 0);
+    }
+  }
+
+  private drawRoadNode(p: { x: number; y: number }, bright: boolean): void {
+    const { ctx } = this;
+    const pulse = 0.5 + 0.5 * Math.sin(this.fogTime * 1.6);
+    ctx.strokeStyle = bright ? `rgba(255, 214, 150, ${0.35 + 0.25 * pulse})` : 'rgba(255, 214, 150, 0.2)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(96, 74, 48, 0.7)';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private drawContinentRegion(r: ContinentView['regions'][number], t: { scale: number; ox: number; oy: number }): void {
+    const { ctx } = this;
+    const rect = regionScreenRect(r, t);
+    const palette =
+      r.state === 'completed'
+        ? {
+            fillA: 'rgba(61, 220, 132, 0.10)',
+            fillB: 'rgba(61, 220, 132, 0.015)',
+            border: 'rgba(61, 220, 132, 0.55)',
+            text: '#3ddc84',
+            glow: 'rgba(61, 220, 132, 0.55)',
+          }
+        : r.state === 'development'
+          ? {
+              fillA: 'rgba(255, 209, 102, 0.06)',
+              fillB: 'rgba(255, 209, 102, 0.01)',
+              border: 'rgba(255, 209, 102, 0.28)',
+              text: '#c9a45a',
+              glow: 'rgba(255, 209, 102, 0.22)',
+            }
+          : {
+              fillA: 'rgba(56, 182, 255, 0.12)',
+              fillB: 'rgba(56, 182, 255, 0.02)',
+              border: 'rgba(56, 182, 255, 0.6)',
+              text: '#6ec8ff',
+              glow: 'rgba(56, 182, 255, 0.6)',
+            };
+
+    const corner = 14 * Math.max(0.6, t.scale);
+    const grad = ctx.createLinearGradient(0, rect.y, 0, rect.y + rect.h);
+    grad.addColorStop(0, palette.fillA);
+    grad.addColorStop(1, palette.fillB);
+    ctx.fillStyle = grad;
+    roundRectPath(ctx, rect.x, rect.y, rect.w, rect.h, corner);
+    ctx.fill();
+    ctx.strokeStyle = palette.border;
+    ctx.lineWidth = 1.6 * Math.max(0.7, t.scale);
+    roundRectPath(ctx, rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2, corner);
+    ctx.stroke();
+
+    const cx = rect.x + rect.w / 2;
+    const float = Math.sin(this.fogTime * 1.3 + r.id * 2.1) * 3 * t.scale;
+    const iconY = rect.y + rect.h * 0.3 + float;
+
+    if (r.state === 'available') {
+      const pulse = 0.5 + 0.5 * Math.sin(this.fogTime * 2.2);
+      ctx.strokeStyle = palette.glow;
+      ctx.globalAlpha = 0.5 + 0.3 * pulse;
+      ctx.lineWidth = 1.8 * t.scale;
+      ctx.beginPath();
+      ctx.arc(cx, iconY, rect.w * 0.2 + (7 + 4 * pulse) * t.scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    if (r.state === 'completed') {
+      const g = ctx.createRadialGradient(cx, iconY, 0, cx, iconY, 27 * t.scale);
+      g.addColorStop(0, 'rgba(61, 220, 132, 0.26)');
+      g.addColorStop(1, 'rgba(61, 220, 132, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, iconY, 27 * t.scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${Math.max(15, Math.round(24 * t.scale))}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+    ctx.fillText(r.icon, cx, iconY);
+
+    ctx.font = `bold ${Math.max(11, Math.round(15 * t.scale))}px "Segoe UI", sans-serif`;
+    ctx.fillStyle = palette.text;
+    ctx.fillText(r.phaseLabel, cx, rect.y + rect.h * 0.56);
+
+    const badge =
+      r.state === 'completed' ? '✅ CONCLUÍDA' : r.state === 'development' ? '🔒 EM DESENVOLVIMENTO' : '🎯 DISPONÍVEL';
+    ctx.font = `bold ${Math.max(8, Math.round(10 * t.scale))}px "Segoe UI", sans-serif`;
+    ctx.fillStyle = r.state === 'development' ? 'rgba(159, 176, 192, 0.72)' : palette.text;
+    ctx.fillText(badge, cx, rect.y + rect.h * 0.82);
+  }
+
+  private ensureContinentFog(regions: ContinentView['regions']): void {
+    const key = regions
+      .filter((r) => r.state !== 'unknown')
+      .map((r) => r.id)
+      .sort((a, b) => a - b)
+      .join(',');
+    if (this.continentFog && this.fogKey === key) return;
+    this.fogKey = key;
+    this.twinkleKey = '';
+    this.continentTwinkles = [];
+    const fog = document.createElement('canvas');
+    fog.width = CONTINENT_DESIGN_W;
+    fog.height = CONTINENT_DESIGN_H;
+    const ctx = fog.getContext('2d')!;
+    const rand = mulberry32(777);
+
+    ctx.fillStyle = '#0b1016';
+    ctx.fillRect(0, 0, fog.width, fog.height);
+
+    const known = regions.filter((r) => r.state !== 'unknown');
+    ctx.globalCompositeOperation = 'destination-out';
+    for (const r of known) {
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
+      const rad = Math.max(r.w, r.h) * 0.7 + 46;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      g.addColorStop(0, 'rgba(0, 0, 0, 1)');
+      g.addColorStop(0.76, 'rgba(0, 0, 0, 1)');
+      g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (const r of known) {
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
+      const rad = Math.max(r.w, r.h) * 0.7;
+      for (let i = 0; i < 9; i++) {
+        const a = rand() * Math.PI * 2;
+        const d = rad * (0.55 + rand() * 0.5);
+        const bx = cx + Math.cos(a) * d;
+        const by = cy + Math.sin(a) * d;
+        if (bx < -10 || bx > fog.width + 10 || by < -10 || by > fog.height + 10) continue;
+        ctx.beginPath();
+        ctx.arc(bx, by, 7 + rand() * 20, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    this.continentFog = fog;
+  }
+
+  private drawContinentFog(t: { scale: number; ox: number; oy: number }, regions: ContinentView['regions']): void {
+    this.ensureContinentFog(regions);
+    const { ctx } = this;
+    if (!this.continentFog) return;
+    const s = t.scale;
+    const ox = t.ox;
+    const oy = t.oy;
+    const fw = CONTINENT_DESIGN_W * s;
+    const fh = CONTINENT_DESIGN_H * s;
+
+    ctx.save();
+    ctx.globalAlpha = 0.88;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.continentFog, ox, oy, fw, fh);
+    ctx.imageSmoothingEnabled = false;
+    ctx.restore();
+
+    const jx = Math.sin(this.fogTime * 0.7) * 1.6 * s;
+    const jy = Math.cos(this.fogTime * 0.55) * 1.6 * s;
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.continentFog, ox + jx, oy + jy, fw, fh);
+    ctx.imageSmoothingEnabled = false;
+    ctx.restore();
+
+    ctx.save();
+    const clouds: { fx: number; fy: number; r: number; sp: number; ph: number }[] = [
+      { fx: 0.2, fy: 0.3, r: 0.52, sp: 0.12, ph: 0 },
+      { fx: 0.78, fy: 0.55, r: 0.55, sp: 0.09, ph: 2.1 },
+      { fx: 0.5, fy: 0.82, r: 0.46, sp: 0.14, ph: 4.2 },
+    ];
+    for (const c of clouds) {
+      const ccx = ox + (c.fx * CONTINENT_DESIGN_W + Math.sin(this.fogTime * c.sp * 2 + c.ph) * 44) * s;
+      const ccy = oy + (c.fy * CONTINENT_DESIGN_H + Math.cos(this.fogTime * c.sp * 1.6 + c.ph) * 28) * s;
+      const cr = c.r * CONTINENT_DESIGN_W * s;
+      const g = ctx.createRadialGradient(ccx, ccy, 0, ccx, ccy, cr);
+      g.addColorStop(0, 'rgba(8, 12, 18, 0.11)');
+      g.addColorStop(0.6, 'rgba(8, 12, 18, 0.06)');
+      g.addColorStop(1, 'rgba(8, 12, 18, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(ox, oy, fw, fh);
+    }
+    for (let i = 0; i < 3; i++) {
+      const wx = ox + (((this.fogTime * 7 + i * 400) % (CONTINENT_DESIGN_W * 1.25)) * s) - 40 * s;
+      const wy = oy + (210 + i * 185 + Math.sin(this.fogTime * 0.4 + i * 1.7) * 42) * s;
+      const wr = (120 + i * 28) * s;
+      const g = ctx.createRadialGradient(wx, wy, 0, wx, wy, wr);
+      g.addColorStop(0, 'rgba(165, 195, 215, 0.05)');
+      g.addColorStop(1, 'rgba(165, 195, 215, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(ox, oy, fw, fh);
+    }
+    ctx.restore();
+
+    ctx.save();
+    for (const [id, p] of this.continentReveal) {
+      const r = regions.find((rr) => rr.id === id);
+      if (!r) continue;
+      const ccx = ox + (r.x + r.w / 2) * s;
+      const ccy = oy + (r.y + r.h / 2) * s;
+      const cr = Math.max(r.w, r.h) * 0.72 * s;
+      const a = 0.9 * (1 - easeOut(p));
+      const g = ctx.createRadialGradient(ccx, ccy, 0, ccx, ccy, cr);
+      g.addColorStop(0, `rgba(10, 14, 20, ${a})`);
+      g.addColorStop(0.8, `rgba(10, 14, 20, ${a * 0.6})`);
+      g.addColorStop(1, 'rgba(10, 14, 20, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(ox, oy, fw, fh);
+    }
+    ctx.restore();
+  }
+
+  private drawContinentAtmosphere(
+    dt: number,
+    t: { scale: number; ox: number; oy: number },
+    regions: ContinentView['regions'],
+  ): void {
+    const { ctx } = this;
+    const s = t.scale;
+    const ox = t.ox;
+    const oy = t.oy;
+
+    for (const p of this.continentParticles) {
+      p.y -= p.speed * dt;
+      p.x += Math.sin(this.fogTime * 0.7 + p.phase) * p.drift * dt * 2;
+      if (p.y < -8) {
+        p.y = CONTINENT_DESIGN_H + 8;
+        p.x = (p.x + 137) % CONTINENT_DESIGN_W;
+      }
+    }
+
+    ctx.save();
+    for (const p of this.continentParticles) {
+      const alpha = p.alpha * (0.55 + 0.45 * Math.sin(this.fogTime * 1.1 + p.phase));
+      const sx = ox + p.x * s;
+      const sy = oy + p.y * s;
+      const r = Math.max(0.5, p.size * s);
+      if (p.glow) {
+        const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 3);
+        g.addColorStop(0, `rgba(170, 214, 255, ${alpha})`);
+        g.addColorStop(1, 'rgba(170, 214, 255, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r * 3, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = `rgba(196, 216, 230, ${alpha * 0.6})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.setLineDash([7 * s, 11 * s]);
+    ctx.lineDashOffset = -this.fogTime * 20 * s;
+    ctx.strokeStyle = 'rgba(160, 224, 242, 0.1)';
+    ctx.lineWidth = 2.2 * s;
+    traceCurve(ctx, CONTINENT_RIVER.map((p) => ({ x: ox + p.x * s, y: oy + p.y * s })));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    const lp = 0.5 + 0.5 * Math.sin(this.fogTime * 0.8);
+    ctx.fillStyle = `rgba(150, 220, 240, ${0.035 + 0.035 * lp})`;
+    ctx.beginPath();
+    ctx.ellipse(ox + 430 * s, oy + 556 * s, 30 * s, 15 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    this.ensureContinentTwinkles(regions);
+    for (const tw of this.continentTwinkles) {
+      const a = 0.22 + 0.22 * Math.sin(this.fogTime * 1.7 + tw.phase);
+      if (a < 0.12) continue;
+      const sx = ox + tw.x * s;
+      const sy = oy + tw.y * s;
+      ctx.fillStyle = `rgba(255, 238, 196, ${a})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, Math.max(0.6, (1.2 + 1.1 * a) * s), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  private ensureContinentTwinkles(regions: ContinentView['regions']): void {
+    if (this.twinkleKey === this.fogKey && this.continentTwinkles.length > 0) return;
+    this.twinkleKey = this.fogKey;
+    this.continentTwinkles = [];
+    const tw = mulberry32(1337);
+    for (const r of regions) {
+      if (r.state === 'unknown') continue;
+      const n = 4;
+      for (let i = 0; i < n; i++) {
+        this.continentTwinkles.push({ x: r.x + tw() * r.w, y: r.y + tw() * r.h, phase: tw() * Math.PI * 2 });
+      }
+    }
+  }
+
+  private drawContinentVignette(): void {
+    const { ctx } = this;
+    const w = this.width;
+    const h = this.height;
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.34, w / 2, h / 2, Math.max(w, h) * 0.78);
+    g.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    g.addColorStop(1, 'rgba(3, 8, 14, 0.48)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  private drawContinentHeader(view: ContinentView): void {
+    const { ctx } = this;
+    const w = this.width;
+    const g = ctx.createLinearGradient(0, 0, 0, 88);
+    g.addColorStop(0, 'rgba(6, 12, 18, 0.55)');
+    g.addColorStop(1, 'rgba(6, 12, 18, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, 88);
+
+    const cx = w / 2;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = 'bold 26px "Segoe UI", sans-serif';
+    ctx.shadowColor = 'rgba(56, 182, 255, 0.35)';
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#6ec8ff';
+    ctx.fillText('🗺️ AVENTURAS', cx, 42);
+    ctx.shadowBlur = 0;
+    ctx.font = '13px "Segoe UI", sans-serif';
+    ctx.fillStyle = '#9fb0c0';
+    ctx.fillText(`Territórios descobertos: ${view.discovered}/${view.total}`, cx, 64);
+    const pct = view.total > 0 ? view.discovered / view.total : 0;
+    const barW = 150;
+    const bx = cx - barW / 2;
+    const by = 72;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    roundRectPath(ctx, bx, by, barW, 4, 2);
+    ctx.fill();
+    ctx.fillStyle = '#38b6ff';
+    roundRectPath(ctx, bx, by, barW * pct, 4, 2);
+    ctx.fill();
+  }
+
+  private drawContinentBackButton(t: { scale: number; ox: number; oy: number }): void {
+    const { ctx } = this;
+    const rect = regionScreenRect(CONTINENT_BACK_BUTTON, t);
+    const g = ctx.createLinearGradient(0, rect.y, 0, rect.y + rect.h);
+    g.addColorStop(0, 'rgba(44, 74, 92, 0.55)');
+    g.addColorStop(1, 'rgba(12, 22, 32, 0.62)');
+    ctx.fillStyle = g;
+    roundRectPath(ctx, rect.x, rect.y, rect.w, rect.h, 9);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(110, 200, 255, 0.35)';
+    ctx.lineWidth = 1.2;
+    roundRectPath(ctx, rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1, 9);
+    ctx.stroke();
+    ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#d7e9f5';
+    ctx.fillText('← VOLTAR', rect.x + rect.w / 2 - 14, rect.y + rect.h / 2 + 1);
+    ctx.font = '11px "Segoe UI", sans-serif';
+    ctx.fillStyle = 'rgba(159, 176, 192, 0.8)';
+    ctx.fillText('ESC', rect.x + rect.w - 32, rect.y + rect.h / 2 + 1);
+  }
+
+  renderMenu(dt: number, variant: MenuVariant): void {
+    this.ensureMenuParticles(variant);
+    this.menuTime += dt;
+    const { ctx } = this;
+    const w = this.width;
+    const h = this.height;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+
+    ctx.fillStyle = '#05070c';
+    ctx.fillRect(0, 0, w, h);
+
+    const dark = variant === 'story';
+    const hue = menuHue(this.menuTime);
+    const px = (this.menuMouseX - 0.5) * 2;
+    const py = (this.menuMouseY - 0.5) * 2;
+
+    const neb = ctx.createRadialGradient(w * 0.5, h * 0.42, 0, w * 0.5, h * 0.42, Math.max(w, h) * 0.72);
+    neb.addColorStop(0, `hsla(${(hue + 40) % 360}, 70%, ${dark ? 12 : 18}%, ${dark ? 0.5 : 0.75})`);
+    neb.addColorStop(0.55, `hsla(${(hue - 28 + 360) % 360}, 75%, 10%, ${dark ? 0.26 : 0.4})`);
+    neb.addColorStop(1, 'rgba(4, 6, 10, 0)');
+    ctx.fillStyle = neb;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    this.drawMenuEnergyOrbs(w, h, dt, dark, px, py);
+    this.drawMenuWaves(w, h, hue, dark, py);
+
+    for (const p of this.menuParticles) {
+      p.life += dt * p.rate;
+      if (p.life >= 1) {
+        p.life = 0;
+        p.x = Math.random() * w;
+        p.y = h * (0.7 + Math.random() * 0.35);
+        p.vx = (Math.random() - 0.5) * 8;
+        p.vy = -(4 + Math.random() * 12);
+        continue;
+      }
+      p.x += (p.vx + Math.sin(this.menuTime * 0.6 + p.phase * 6.28) * 10) * dt;
+      p.y += p.vy * dt;
+      const a = Math.sin(p.life * Math.PI);
+      const tw = 0.55 + 0.45 * Math.sin(this.menuTime * 2.2 + p.phase * 20);
+      const ox = p.x + px * p.depth * 18;
+      const oy = p.y + py * p.depth * 12;
+      ctx.fillStyle = `hsla(${p.hue}, 96%, ${72 + a * 16}%, ${a * tw * (dark ? 0.5 : 0.85)})`;
+      const s = p.size * (0.5 + 0.7 * a);
+      ctx.fillRect(ox, oy, s, s);
+    }
+
+    if (variant === 'creative') this.drawMenuGears(w, h, dt, dark);
+
+    const bottomHue = (hue + Math.sin(this.menuTime * 0.08) * 28 + 360) % 360;
+    const pulse = 0.5 + 0.5 * Math.sin(this.menuTime * 0.25);
+    const bot = ctx.createLinearGradient(0, h * 0.62, 0, h);
+    bot.addColorStop(0, `hsla(${bottomHue}, 90%, 42%, 0)`);
+    bot.addColorStop(0.55, `hsla(${bottomHue}, 95%, 48%, ${(dark ? 0.14 : 0.24) + 0.08 * pulse})`);
+    bot.addColorStop(1, `hsla(${(bottomHue + 20) % 360}, 95%, 55%, ${(dark ? 0.2 : 0.32) + 0.1 * pulse})`);
+    ctx.fillStyle = bot;
+    ctx.fillRect(0, h * 0.62, w, h * 0.38);
+
+    const er = Math.min(w, h) * 0.42;
+    const eg = ctx.createRadialGradient(w * 0.5, h * 0.82, 0, w * 0.5, h * 0.82, er);
+    eg.addColorStop(0, `hsla(${bottomHue}, 95%, 56%, ${(dark ? 0.1 : 0.17) * (0.6 + 0.4 * pulse)})`);
+    eg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = eg;
+    ctx.fillRect(w * 0.5 - er, h * 0.82 - er, er * 2, er * 2);
+
+    ctx.restore();
+
+    const vig = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.38, w / 2, h / 2, Math.max(w, h) * 0.82);
+    vig.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vig.addColorStop(1, 'rgba(0, 0, 0, 0.58)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  private drawMenuEnergyOrbs(w: number, h: number, dt: number, dark: boolean, px: number, py: number): void {
+    const { ctx } = this;
+    for (const o of this.menuOrbs) {
+      o.x += o.vx * dt;
+      o.y += o.vy * dt;
+      const margin = o.r * 1.4;
+      if (o.x < -margin) o.x = w + margin;
+      if (o.x > w + margin) o.x = -margin;
+      if (o.y < -margin) o.y = h + margin;
+      if (o.y > h + margin) o.y = -margin;
+      const fade = 0.5 + 0.5 * Math.sin(this.menuTime * 0.5 + o.phase);
+      const ox = o.x + px * o.depth * 26;
+      const oy = o.y + py * o.depth * 16;
+      const oh = (o.hue + Math.sin(this.menuTime * 0.12 + o.phase) * 20 + 360) % 360;
+      const g = ctx.createRadialGradient(ox, oy, 0, ox, oy, o.r);
+      g.addColorStop(0, `hsla(${oh}, 94%, ${dark ? 58 : 66}%, ${0.09 + 0.1 * fade})`);
+      g.addColorStop(1, `hsla(${oh}, 90%, 50%, 0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(ox, oy, o.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  private drawMenuWaves(w: number, h: number, hue: number, dark: boolean, py: number): void {
+    const { ctx } = this;
+    for (let i = 0; i < 3; i++) {
+      const lift = Math.sin(this.menuTime * 0.13 + i * 2.1) * 24;
+      const baseY = h * (0.5 + (i - 1) * 0.2) + lift + py * 8;
+      const hh = (hue + i * 26 + 360) % 360;
+      ctx.beginPath();
+      for (let x = -8; x <= w + 8; x += 10) {
+        const y =
+          baseY + Math.sin(x * 0.004 + this.menuTime * 0.5 + i * 1.7) * 20 + Math.sin(x * 0.011 - this.menuTime * 0.32 + i) * 10;
+        if (x === -8) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = `hsla(${hh}, 90%, 62%, ${dark ? 0.016 : 0.03})`;
+      ctx.lineWidth = 7;
+      ctx.stroke();
+      ctx.strokeStyle = `hsla(${hh}, 92%, 66%, ${dark ? 0.04 : 0.075})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  private drawMenuGears(w: number, h: number, dt: number, dark: boolean): void {
+    const { ctx } = this;
+    for (const g of this.menuGears) {
+      g.spin += g.speed * dt;
+      g.y -= 4 * dt;
+      g.x += Math.sin(this.menuTime * 0.2 + g.depth * 9) * 6 * dt;
+      if (g.y < -34) {
+        g.y = h + 34;
+        g.x = Math.random() * w;
+      }
+      ctx.save();
+      ctx.translate(g.x, g.y);
+      ctx.rotate(g.spin);
+      ctx.strokeStyle = `hsla(${g.hue}, 75%, 66%, ${dark ? 0.1 : 0.2})`;
+      ctx.lineWidth = g.r * 0.16;
+      const R = g.r * 1.18;
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI) / 4;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * g.r, Math.sin(a) * g.r);
+        ctx.lineTo(Math.cos(a) * R, Math.sin(a) * R);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(0, 0, g.r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, g.r * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  private ensureMenuParticles(variant: MenuVariant): void {
+    if (this.menuVariant === variant && this.menuParticles.length > 0) return;
+    this.menuVariant = variant;
+    const rand = mulberry32(777 + variant.length * 13);
+    const w = this.width;
+    const h = this.height;
+    const count = Math.max(38, Math.min(110, Math.floor((w * h) / 22000)));
+    this.menuParticles = [];
+    for (let i = 0; i < count; i++) {
+      this.menuParticles.push({
+        x: rand() * w,
+        y: rand() * h,
+        vx: (rand() - 0.5) * 8,
+        vy: -(4 + rand() * 12),
+        size: 1 + rand() * 2.4,
+        life: rand(),
+        rate: 0.22 + rand() * 0.35,
+        phase: rand(),
+        hue: 185 + rand() * 105,
+        depth: 0.2 + rand() * 0.8,
+      });
+    }
+    this.menuOrbs = [];
+    for (let i = 0; i < 7; i++) {
+      this.menuOrbs.push({
+        x: rand() * w,
+        y: rand() * h,
+        r: Math.min(w, h) * (0.18 + rand() * 0.17),
+        vx: (rand() - 0.5) * 6,
+        vy: (rand() - 0.5) * 4,
+        hue: rand() * 360,
+        depth: 0.25 + rand() * 0.75,
+        phase: rand() * Math.PI * 2,
+      });
+    }
+    this.menuGears = [];
+    if (variant === 'creative') {
+      for (let i = 0; i < 7; i++) {
+        this.menuGears.push({
+          x: rand() * w,
+          y: rand() * h,
+          r: 8 + rand() * 15,
+          spin: rand() * Math.PI * 2,
+          speed: 0.4 + rand() * 0.7,
+          hue: 30 + rand() * 45,
+          depth: 0.3 + rand() * 0.7,
+        });
+      }
+    }
   }
 
   private drawBiomeBackground(biome: BiomeId): void {
@@ -164,6 +1439,13 @@ export class Renderer {
           rect(x, y, 10, 16, '#5a3d2b');
           circle(x, y - 16, 18 + rand() * 10, '#2f7d3f');
         }
+        for (let i = 0; i < 26; i++) circle(rand() * worldW, rand() * worldH, 2.5 + rand() * 3, '#e8c07a');
+        for (let i = 0; i < 18; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          circle(x, y, 3 + rand() * 2, i % 2 ? '#d96b8a' : '#e8d46a');
+          circle(x, y, 1, '#f4efe0');
+        }
         break;
       }
       case 'desert': {
@@ -173,6 +1455,22 @@ export class Renderer {
           const x = rand() * worldW;
           const y = rand() * worldH;
           line(x, y, x + 4 - rand() * 8, y - 6 - rand() * 8, 'rgba(140, 100, 50, 0.6)');
+        }
+        for (let i = 0; i < 10; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          rect(x, y - 16, 5, 16, '#5a7d4a');
+          rect(x - 6, y - 9, 4, 8, '#5a7d4a');
+          rect(x + 6, y - 12, 4, 8, '#5a7d4a');
+        }
+        for (let i = 0; i < 12; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          ctx.strokeStyle = 'rgba(140, 100, 50, 0.35)';
+          ctx.lineWidth = Math.max(1, s(5));
+          ctx.beginPath();
+          ctx.arc(s(x), s(y), s(40 + rand() * 50), Math.PI * 0.15, Math.PI * 0.85);
+          ctx.stroke();
         }
         break;
       }
@@ -191,6 +1489,13 @@ export class Renderer {
           ctx.fill();
           rect(x, y + 4, 8, 12, '#3a2b20');
         }
+        for (let i = 0; i < 20; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          circle(x, y, 6 + rand() * 8, 'rgba(255, 255, 255, 0.35)');
+          circle(x, y, 3, 'rgba(190, 215, 235, 0.7)');
+        }
+        for (let i = 0; i < 18; i++) diamond(rand() * worldW, rand() * worldH, 3 + rand() * 4, '#ffffff');
         break;
       }
       case 'volcanic': {
@@ -202,6 +1507,24 @@ export class Renderer {
           line(x, y, x + Math.cos(angle) * 40, y + Math.sin(angle) * 40, i % 2 ? '#ff6b35' : '#ffa94d', 5);
         }
         for (let i = 0; i < 30; i++) circle(rand() * worldW, rand() * worldH, 1.5 + rand() * 3, 'rgba(255, 180, 80, 0.8)');
+        for (let i = 0; i < 6; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          circle(x, y, 20 + rand() * 26, 'rgba(120, 40, 15, 0.55)');
+          circle(x, y, 10 + rand() * 14, 'rgba(255, 120, 40, 0.5)');
+          circle(x, y, 4 + rand() * 6, 'rgba(255, 200, 100, 0.8)');
+        }
+        for (let i = 0; i < 16; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          ctx.fillStyle = '#20140f';
+          ctx.beginPath();
+          ctx.moveTo(s(x), s(y - 10));
+          ctx.lineTo(s(x + 9), s(y + 6));
+          ctx.lineTo(s(x - 9), s(y + 6));
+          ctx.closePath();
+          ctx.fill();
+        }
         break;
       }
       case 'ruins': {
@@ -217,6 +1540,27 @@ export class Renderer {
           const y = rand() * worldH;
           line(x, y, x + 10 + rand() * 16, y - 6, '#3f7d4f', 3);
         }
+        for (let i = 0; i < 8; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          ctx.fillStyle = '#4a4a54';
+          ctx.save();
+          ctx.translate(s(x), s(y));
+          ctx.rotate(-0.4 + rand() * 0.8);
+          ctx.fillRect(-8, -16, 16, 32);
+          ctx.restore();
+          rect(x + 12, y + 6, 10, 8, '#3a3a44');
+          rect(x - 16, y + 10, 12, 6, '#3a3a44');
+        }
+        for (let i = 0; i < 10; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          ctx.fillStyle = '#2e5a3a';
+          ctx.beginPath();
+          ctx.arc(s(x), s(y - 20), s(14), 0, Math.PI * 2);
+          ctx.fill();
+          rect(x, y - 10, 6, 10, '#4a3524');
+        }
         break;
       }
       case 'cosmic': {
@@ -230,6 +1574,29 @@ export class Renderer {
           ctx.fill();
         }
         for (let i = 0; i < 16; i++) diamond(rand() * worldW, rand() * worldH, 6 + rand() * 6, '#8a7bd8');
+        for (let i = 0; i < 3; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          ctx.fillStyle = 'rgba(70, 55, 150, 0.2)';
+          ctx.beginPath();
+          ctx.arc(s(x), s(y), s(70 + rand() * 60), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(180, 160, 255, 0.7)';
+          ctx.beginPath();
+          ctx.arc(s(x), s(y), s(18 + rand() * 14), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(160, 140, 255, 0.5)';
+          ctx.lineWidth = Math.max(1, s(4));
+          ctx.beginPath();
+          ctx.ellipse(s(x), s(y), s(34 + rand() * 16), s(8), 0.4 + rand() * 0.4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        for (let i = 0; i < 6; i++) {
+          const x = rand() * worldW;
+          const y = rand() * worldH;
+          const ang = rand() * Math.PI * 2;
+          line(x, y, x + Math.cos(ang) * 90, y + Math.sin(ang) * 90, 'rgba(200, 190, 255, 0.35)', 2);
+        }
         break;
       }
     }
@@ -256,6 +1623,57 @@ export class Renderer {
       ctx.lineTo(right, y);
     }
     ctx.stroke();
+  }
+
+  private drawAdventureBackground(adv: AdventureRenderData): void {
+    const { ctx } = this;
+    const was = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(adv.background, 0, 0, CONFIG.adventure.worldW, CONFIG.adventure.worldH);
+    ctx.imageSmoothingEnabled = was;
+  }
+
+  private drawTerritoryLabels(adv: AdventureRenderData): void {
+    const { ctx } = this;
+    ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const t of adv.territoryLabels) {
+      ctx.fillStyle = 'rgba(18, 24, 16, 0.55)';
+      ctx.fillText(t.name, t.x + 1, t.y + 1);
+      ctx.fillStyle = 'rgba(238, 242, 224, 0.55)';
+      ctx.fillText(t.name, t.x, t.y);
+    }
+  }
+
+  private drawFog(adv: AdventureRenderData): void {
+    const { ctx } = this;
+    const { fog, fogCols, fogRows, fogCell } = adv;
+    for (let cy = 0; cy < fogRows; cy++) {
+      for (let cx = 0; cx < fogCols; cx++) {
+        const v = fog[cy * fogCols + cx];
+        if (v <= 0.01) continue;
+        const wob = 0.82 + 0.08 * Math.sin(this.fogTime * 1.4 + ((cx * 12.9898 + cy * 78.233) % 6.2832));
+        ctx.fillStyle = `rgba(10, 13, 17, ${Math.min(0.95, v * wob)})`;
+        ctx.fillRect(cx * fogCell, cy * fogCell, fogCell, fogCell);
+      }
+    }
+  }
+
+  private drawAdventureObjective(adv: AdventureRenderData): void {
+    const { ctx } = this;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * 2.4);
+    const x = adv.enemyBase.x;
+    const y = adv.enemyBase.y - 92;
+    ctx.strokeStyle = `rgba(255, 70, 85, ${0.55 + 0.35 * pulse})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x, y, 26 + 5 * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(255, 70, 85, ${0.82 + 0.18 * pulse})`;
+    ctx.fillText('CASTELO INIMIGO', x, y - 36);
   }
 
   private drawRoad(route: { x: number; y: number }[] | null): void {
@@ -395,30 +1813,66 @@ export class Renderer {
       this.drawCastle(s);
       return;
     }
+    if (s.kind === 'house') {
+      this.drawHouse(s);
+      return;
+    }
+    if (s.kind === 'market') {
+      this.drawMarket(s);
+      return;
+    }
+    this.drawMine(s);
+  }
+
+  private drawMine(s: Structure): void {
     const { ctx } = this;
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * 3);
-    ctx.fillStyle = `rgba(255, 209, 102, ${0.1 + 0.08 * pulse})`;
+    const neutral = s.owner === 'neutral';
+    const enemy = s.owner === 'enemy';
+    const glowColor = enemy ? 'rgba(255, 70, 85,' : neutral ? 'rgba(154, 160, 166,' : 'rgba(255, 209, 102,';
+    const coin = enemy ? '#ff4655' : neutral ? '#9aa0a6' : '#ffd166';
+    const markColor = enemy ? '#5c0e16' : neutral ? '#4a5058' : '#7a5b12';
+    const mark = enemy ? '✖' : neutral ? '·' : '$';
+    ctx.fillStyle = `${glowColor}${0.1 + 0.08 * pulse})`;
     ctx.beginPath();
     ctx.arc(s.x, s.y, s.radius + 6 + pulse * 3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = s.color;
+    ctx.fillStyle = '#3f2d1a';
     ctx.beginPath();
     ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+    ctx.fillStyle = coin;
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.radius * 0.55, 0, Math.PI * 2);
+    ctx.arc(s.x, s.y, s.radius * 0.78, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#7a5b12';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.beginPath();
+    ctx.arc(s.x - s.radius * 0.25, s.y - s.radius * 0.3, s.radius * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#c9961c';
+    for (let i = 0; i < 3; i++) {
+      const a = -Math.PI / 2 + (i - 1) * 0.9;
+      ctx.beginPath();
+      ctx.arc(s.x + Math.cos(a) * s.radius * 0.48, s.y + Math.sin(a) * s.radius * 0.48, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = markColor;
     ctx.font = 'bold 12px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('$', s.x, s.y + 0.5);
+    ctx.fillText(mark, s.x, s.y + 0.5);
     ctx.strokeStyle = 'rgba(255,255,255,0.35)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
     ctx.stroke();
+    if (s.captureProgress !== undefined && s.captureProgress > 0) {
+      ctx.strokeStyle = '#3ddc84';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.radius + 4, -Math.PI / 2, -Math.PI / 2 + (s.captureProgress / CONFIG.adventure.capture.time) * Math.PI * 2);
+      ctx.stroke();
+    }
     if (s.flashTimer > 0) {
       const a = Math.min(1, s.flashTimer / CONFIG.ui.hitFlashDuration) * 0.7;
       ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
@@ -439,6 +1893,13 @@ export class Renderer {
         const px = s.x - s.w / 2 + (s.w / 4) * i;
         ctx.fillRect(px + 2, s.y + 3, 6, 4);
       }
+      return;
+    }
+    if (s.kind === 'house' || s.kind === 'market') {
+      ctx.fillStyle = 'rgba(60, 50, 32, 0.9)';
+      ctx.fillRect(s.x - s.radius, s.y - s.radius + 4, s.radius * 2, 8);
+      ctx.fillStyle = 'rgba(42, 35, 24, 0.95)';
+      ctx.fillRect(s.x - 7, s.y - 5, 14, 8);
       return;
     }
     if (s.kind === 'tower') {
@@ -472,30 +1933,73 @@ export class Renderer {
     const r = s.radius;
     const ratio = Math.max(0, s.hp / s.maxHp);
     const dmgShade = Math.floor((1 - ratio) * 60);
+    const enemy = s.team === 'enemy';
+    const stone = enemy ? [172, 96, 90] : [143, 155, 170];
+    const stoneLight = enemy ? [196, 112, 104] : [165, 178, 196];
+    const stoneDark = enemy ? [116, 58, 54] : [95, 107, 122];
+    const towerCol = enemy ? [150, 78, 72] : [123, 133, 145];
+    if (Math.abs(x - CONFIG.positions.base.x) < 4 && Math.abs(y - CONFIG.positions.base.y) < 4) {
+      this.drawGateHighlights();
+    }
     ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.beginPath();
     ctx.ellipse(x, y + r * 0.9, r * 1.3, 8, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = `rgb(${143 - dmgShade}, ${155 - dmgShade}, ${170 - dmgShade})`;
+    ctx.fillStyle = `rgb(${stone[0] - dmgShade}, ${stone[1] - dmgShade}, ${stone[2] - dmgShade})`;
     ctx.fillRect(x - r, y - r, r * 2, r * 2);
-    ctx.fillStyle = `rgb(${165 - dmgShade}, ${178 - dmgShade}, ${196 - dmgShade})`;
+    ctx.fillStyle = `rgb(${stoneLight[0] - dmgShade}, ${stoneLight[1] - dmgShade}, ${stoneLight[2] - dmgShade})`;
     ctx.fillRect(x - r + 6, y - r + 6, r * 2 - 12, r * 2 - 12);
 
-    ctx.fillStyle = `rgb(${95 - dmgShade}, ${107 - dmgShade}, ${122 - dmgShade})`;
+    ctx.fillStyle = `rgb(${stoneDark[0] - dmgShade}, ${stoneDark[1] - dmgShade}, ${stoneDark[2] - dmgShade})`;
     const cren = r * 2 / 5;
     for (let i = 0; i < 5; i++) {
       ctx.fillRect(x - r + i * cren + 2, y - r - 8, cren - 4, 8);
     }
 
     const tw = r * 0.5;
-    ctx.fillStyle = `rgb(${123 - dmgShade}, ${133 - dmgShade}, ${145 - dmgShade})`;
+    ctx.fillStyle = `rgb(${towerCol[0] - dmgShade}, ${towerCol[1] - dmgShade}, ${towerCol[2] - dmgShade})`;
     for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
       ctx.fillRect(x + sx * (r - tw / 2) - tw / 2, y + sy * (r - tw / 2) - tw / 2, tw, tw);
     }
 
-    ctx.fillStyle = '#2c3138';
-    ctx.fillRect(x - r * 0.3, y + r * 0.1, r * 0.6, r * 0.9);
+    ctx.fillStyle = '#232830';
+    ctx.beginPath();
+    ctx.arc(x, y + r * 0.12, r * 0.18, Math.PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(x - r * 0.18, y + r * 0.12, r * 0.36, r * 0.88);
+    const gate = enemy ? 'rgba(255, 84, 92, 0.85)' : 'rgba(255, 209, 102, 0.85)';
+    ctx.strokeStyle = gate;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x - r * 0.18, y + r * 0.12, r * 0.36, r * 0.88);
+    ctx.strokeStyle = enemy ? 'rgba(255, 84, 92, 0.7)' : 'rgba(255, 209, 102, 0.7)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - r * 0.1, y + r * 0.12, r * 0.2, r * 0.88);
+
+    ctx.strokeStyle = 'rgba(30, 33, 40, 0.9)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r - 14);
+    ctx.lineTo(x, y - r - 2);
+    ctx.stroke();
+    ctx.fillStyle = enemy ? '#ff4655' : '#3ddc84';
+    ctx.beginPath();
+    ctx.moveTo(x, y - r - 14);
+    ctx.lineTo(x + r * 0.3, y - r - 10);
+    ctx.lineTo(x, y - r - 6);
+    ctx.closePath();
+    ctx.fill();
+
+    const st = performance.now() / 1000;
+    for (let i = 0; i < 2; i++) {
+      const sw = Math.sin(st * 0.6 + i * 2.4) * 5;
+      const rise = (st * 7 + i * 24) % 30;
+      ctx.fillStyle = `rgba(210, 220, 232, ${0.1 * (1 - rise / 30)})`;
+      ctx.beginPath();
+      ctx.arc(x + sw, y - r - 20 - rise, 4 + rise * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     if (ratio < 0.6) {
       ctx.strokeStyle = `rgba(20, 22, 28, ${0.5 + (0.6 - ratio) * 1.2})`;
@@ -524,6 +2028,18 @@ export class Renderer {
     if (s.hp < s.maxHp) this.drawHpBar(x, y - r - 18, r * 2.4, 6, s.hp, s.maxHp);
   }
 
+  private drawGateHighlights(): void {
+    const { ctx } = this;
+    const c = CONFIG.castle;
+    const bx = CONFIG.positions.base.x;
+    const by = CONFIG.positions.base.y;
+    ctx.fillStyle = 'rgba(255, 209, 102, 0.16)';
+    ctx.fillRect(bx - c.gateWidth / 2, by - c.wallHalf - 4, c.gateWidth, 8);
+    ctx.fillRect(bx - c.gateWidth / 2, by + c.wallHalf - 4, c.gateWidth, 8);
+    ctx.fillRect(bx - c.wallHalf - 4, by - c.gateWidth / 2, 8, c.gateWidth);
+    ctx.fillRect(bx + c.wallHalf - 4, by - c.gateWidth / 2, 8, c.gateWidth);
+  }
+
   private drawWall(s: Structure): void {
     const { ctx } = this;
     const ratio = Math.max(0, s.hp / s.maxHp);
@@ -535,6 +2051,23 @@ export class Renderer {
     ctx.fillRect(s.x - s.w / 2, s.y - s.h / 2, s.w, s.h);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
     ctx.fillRect(s.x - s.w / 2, s.y - s.h / 2, s.w, Math.min(4, s.h));
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.lineWidth = 1;
+    if (s.w >= s.h) {
+      ctx.beginPath();
+      for (let mx = s.x - s.w / 2 + 14; mx < s.x + s.w / 2; mx += 14) {
+        ctx.moveTo(mx, s.y - s.h / 2 + 1);
+        ctx.lineTo(mx, s.y + s.h / 2 - 1);
+      }
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      for (let my = s.y - s.h / 2 + 14; my < s.y + s.h / 2; my += 14) {
+        ctx.moveTo(s.x - s.w / 2 + 1, my);
+        ctx.lineTo(s.x + s.w / 2 - 1, my);
+      }
+      ctx.stroke();
+    }
     if (ratio < 0.6) {
       ctx.strokeStyle = 'rgba(15, 17, 22, 0.75)';
       ctx.lineWidth = 1.5;
@@ -574,10 +2107,20 @@ export class Renderer {
     ctx.fillStyle = `rgb(${95 - dmgShade}, ${107 - dmgShade}, ${122 - dmgShade})`;
     ctx.fillRect(s.x - r * 0.95, s.y - r - 6, r * 0.7, 6);
     ctx.fillRect(s.x + r * 0.25, s.y - r - 6, r * 0.7, 6);
+    ctx.fillStyle = '#1c2026';
+    ctx.fillRect(s.x - 3, s.y - r * 0.55, 6, r * 0.55);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.fillRect(s.x - 1.5, s.y - r * 0.55, 3, r * 0.55);
     const firing = s.flashTimer > 0;
     ctx.fillStyle = firing ? '#ffffff' : '#ffd166';
     ctx.beginPath();
     ctx.arc(s.x, s.y - r * 0.5, firing ? 5 : 3, 0, Math.PI * 2);
+    ctx.fill();
+    const bt = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(bt * 2.2 + s.x);
+    ctx.fillStyle = `rgba(255, 209, 102, ${0.16 + 0.18 * pulse})`;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y - r * 0.5, 7 + pulse * 3, 0, Math.PI * 2);
     ctx.fill();
     if (s.flashTimer > 0) {
       const a = Math.min(1, s.flashTimer / CONFIG.ui.hitFlashDuration) * 0.8;
@@ -595,6 +2138,100 @@ export class Renderer {
       ctx.stroke();
     }
     if (s.hp < s.maxHp) this.drawHpBar(s.x, s.y - r - 13, r * 2, 4, s.hp, s.maxHp);
+  }
+
+  private drawHouse(s: Structure): void {
+    const { ctx } = this;
+    const r = s.radius;
+    const ratio = Math.max(0, s.hp / s.maxHp);
+    const dmgShade = Math.floor((1 - ratio) * 45);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(s.x - r, s.y - r * 0.6 + 3, r * 2, r * 1.6);
+    ctx.fillStyle = `rgb(${200 - dmgShade}, ${166 - dmgShade}, ${118 - dmgShade})`;
+    ctx.fillRect(s.x - r, s.y - r * 0.6, r * 2, r * 1.6);
+    ctx.fillStyle = `rgb(${150 - dmgShade}, ${120 - dmgShade}, ${80 - dmgShade})`;
+    ctx.beginPath();
+    ctx.moveTo(s.x - r * 1.05, s.y - r * 0.55);
+    ctx.lineTo(s.x, s.y - r * 1.5);
+    ctx.lineTo(s.x + r * 1.05, s.y - r * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#3a2c1a';
+    ctx.fillRect(s.x - r * 0.28, s.y - r * 0.1, r * 0.56, r * 1.1);
+    ctx.fillStyle = 'rgba(255, 209, 102, 0.85)';
+    ctx.fillRect(s.x - r * 0.16, s.y - r * 0.35, r * 0.1, r * 0.6);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.fillRect(s.x - r * 0.8, s.y - r * 0.5, r * 0.4, r * 0.28);
+    ctx.fillRect(s.x + r * 0.4, s.y - r * 0.5, r * 0.4, r * 0.28);
+    if (s.flashTimer > 0) {
+      const a = Math.min(1, s.flashTimer / CONFIG.ui.hitFlashDuration) * 0.7;
+      ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+      ctx.fillRect(s.x - r, s.y - r * 1.5, r * 2, r * 2.1);
+    }
+    if (s.hp < s.maxHp) this.drawHpBar(s.x, s.y - r * 1.5 - 10, r * 2, 4, s.hp, s.maxHp);
+  }
+
+  private drawMarket(s: Structure): void {
+    const { ctx } = this;
+    const r = s.radius;
+    const ratio = Math.max(0, s.hp / s.maxHp);
+    const dmgShade = Math.floor((1 - ratio) * 45);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(s.x - r, s.y - r + 3, r * 2, r * 2);
+    ctx.fillStyle = `rgb(${92 - dmgShade}, ${120 - dmgShade}, ${200 - dmgShade})`;
+    ctx.fillRect(s.x - r, s.y - r, r * 2, r * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.fillRect(s.x - r, s.y - r, r * 2, r * 0.3);
+    ctx.fillStyle = '#202a3a';
+    ctx.fillRect(s.x - r * 0.7, s.y - r * 0.75, r * 0.42, r * 1.1);
+    ctx.fillRect(s.x - r * 0.1, s.y - r * 0.75, r * 0.42, r * 1.1);
+    ctx.fillRect(s.x + r * 0.5, s.y - r * 0.75, r * 0.42, r * 1.1);
+    ctx.fillStyle = '#e8b96a';
+    ctx.fillRect(s.x - r * 0.7, s.y - r * 0.15, r * 0.42, r * 0.5);
+    ctx.fillRect(s.x - r * 0.1, s.y - r * 0.15, r * 0.42, r * 0.5);
+    ctx.fillRect(s.x + r * 0.5, s.y - r * 0.15, r * 0.42, r * 0.5);
+    const st = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(st * 3);
+    ctx.fillStyle = `rgba(232, 185, 106, ${0.12 + 0.1 * pulse})`;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r + 5 + pulse * 2, 0, Math.PI * 2);
+    ctx.fill();
+    if (s.flashTimer > 0) {
+      const a = Math.min(1, s.flashTimer / CONFIG.ui.hitFlashDuration) * 0.7;
+      ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+      ctx.fillRect(s.x - r, s.y - r, r * 2, r * 2);
+    }
+    if (s.hp < s.maxHp) this.drawHpBar(s.x, s.y - r - 12, r * 2, 4, s.hp, s.maxHp);
+  }
+
+  private drawBuildPreview(p: BuildPreview): void {
+    const { ctx } = this;
+    const cfg = CONFIG.progression.buildings[p.kind];
+    const r = cfg.radius;
+    const col = p.valid ? '61, 220, 132' : '255, 70, 85';
+    ctx.fillStyle = `rgba(${col}, 0.22)`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(${col}, 0.9)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    if (p.kind === 'tower') {
+      ctx.setLineDash([8, 6]);
+      ctx.strokeStyle = `rgba(${col}, 0.55)`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, CONFIG.progression.buildings.tower.range, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.fillStyle = p.valid ? '#3ddc84' : '#ff4655';
+    ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(p.valid ? '✓' : '✕', p.x, p.y - r - 10);
   }
 
   private drawUnits(camera: Camera, units: Unit[], selected: ReadonlySet<Unit>): void {
@@ -682,32 +2319,62 @@ export class Renderer {
 
   private drawUnitBody(u: Unit): void {
     const { ctx } = this;
-    ctx.fillStyle = u.color;
+    const r = u.radius;
+    const x = u.x;
+    const y = u.y;
+    const accent = u.team === 'player' ? '#ffffff' : '#2a0d12';
     switch (u.troopType) {
       case 'archer':
+        ctx.fillStyle = u.color;
         ctx.beginPath();
-        ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2);
+        ctx.moveTo(x, y - r * 1.05);
+        ctx.lineTo(x + r * 0.95, y + r * 0.75);
+        ctx.lineTo(x - r * 0.95, y + r * 0.75);
+        ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
         ctx.beginPath();
-        ctx.arc(u.x, u.y, u.radius * 0.4, 0, Math.PI * 2);
+        ctx.moveTo(x, y - r * 0.45);
+        ctx.lineTo(x + r * 0.45, y + r * 0.75);
+        ctx.lineTo(x - r * 0.45, y + r * 0.75);
+        ctx.closePath();
         ctx.fill();
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(x, y - r * 0.1, r * 0.5, Math.PI * 0.15, Math.PI * 0.85);
+        ctx.stroke();
         break;
       case 'tank':
-        ctx.fillRect(u.x - u.radius, u.y - u.radius, u.radius * 2, u.radius * 2);
+        ctx.fillStyle = u.color;
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x - r, y - r, r * 2, r * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+        ctx.fillRect(x - r * 0.72, y - r * 0.72, r * 1.44, r * 0.34);
+        ctx.fillStyle = u.team === 'player' ? '#dceeff' : '#f0b6b0';
+        ctx.fillRect(x - r * 0.38, y - r * 0.38, r * 0.76, r * 0.76);
+        ctx.fillStyle = accent;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 0.2, 0, Math.PI * 2);
+        ctx.fill();
         break;
       case 'champion':
-        ctx.beginPath();
-        ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#ffd166';
+        ctx.strokeStyle = 'rgba(255, 209, 102, 0.9)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(u.x, u.y, u.radius + 2, 0, Math.PI * 2);
+        ctx.arc(x, y, r + 2.5, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = u.color;
+        star5(ctx, x, y, r + 1.5, r * 0.55);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
         ctx.beginPath();
-        ctx.arc(u.x, u.y, u.radius * 0.3, 0, Math.PI * 2);
+        ctx.arc(x, y, r * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = accent;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 0.3, 0, Math.PI * 2);
         ctx.fill();
         break;
       case 'boss':
@@ -733,8 +2400,23 @@ export class Renderer {
         ctx.fill();
         break;
       default:
+        ctx.fillStyle = u.color;
         ctx.beginPath();
-        ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2);
+        ctx.moveTo(x + r * 0.28, y - r);
+        ctx.lineTo(x + r * 0.88, y - r * 0.18);
+        ctx.lineTo(x - r * 0.05, y + r * 0.85);
+        ctx.lineTo(x - r * 0.82, y - r * 0.18);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x + r * 0.12, y - r * 0.1);
+        ctx.lineTo(x - r * 0.12, y + r * 0.55);
+        ctx.stroke();
+        ctx.fillStyle = accent;
+        ctx.beginPath();
+        ctx.arc(x, y - r * 0.1, r * 0.28, 0, Math.PI * 2);
         ctx.fill();
         break;
     }
@@ -892,19 +2574,40 @@ export class Renderer {
     }
   }
 
-  private drawOverlay(overlay: RenderOverlay): void {
+  private drawOverlay(o: RenderOverlay): void {
     const { ctx } = this;
-    ctx.fillStyle = `rgba(0, 0, 0, ${overlay.alpha})`;
+    const p = Math.max(0, Math.min(1, o.progress));
+    const inT = easeOut(Math.min(1, p / 0.4));
+    ctx.fillStyle = `rgba(0, 0, 0, ${o.alpha})`;
     ctx.fillRect(0, 0, this.width, this.height);
-    const textAlpha = Math.min(1, overlay.alpha * 1.4);
+    ctx.globalAlpha = o.alpha * 0.35;
+    ctx.fillStyle = o.tint;
+    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.globalAlpha = 1;
+
+    const t = performance.now() / 1000;
+    for (let i = 0; i < 12; i++) {
+      const px = (i * 137.5 + t * 16) % this.width;
+      const py = ((i * 89.3 + t * 12 + Math.sin(t * 0.9 + i) * 30) % this.height + this.height) % this.height;
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.16 * o.alpha})`;
+      ctx.fillRect(px, py, 2, 2);
+    }
+
+    const scale = 0.9 + 0.1 * inT;
+    const textAlpha = Math.min(1, o.alpha * 1.4) * (0.35 + 0.65 * inT);
+    ctx.save();
+    ctx.translate(this.width / 2, this.height / 2 - 20);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha = textAlpha;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = `rgba(230, 237, 243, ${textAlpha})`;
-    ctx.font = '800 44px "Segoe UI", sans-serif';
-    ctx.fillText(overlay.title, this.width / 2, this.height / 2 - 18);
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = '800 40px "Segoe UI", sans-serif';
+    ctx.fillText(`${o.icon} ${o.title}`, 0, 0);
     ctx.fillStyle = `rgba(56, 182, 255, ${textAlpha})`;
-    ctx.font = '600 22px "Segoe UI", sans-serif';
-    ctx.fillText(overlay.subtitle, this.width / 2, this.height / 2 + 24);
+    ctx.font = '600 20px "Segoe UI", sans-serif';
+    ctx.fillText(o.subtitle, 0, 46);
+    ctx.restore();
   }
 }
 

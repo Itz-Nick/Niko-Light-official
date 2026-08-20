@@ -2,7 +2,9 @@ import { CONFIG } from '../config';
 import type { Team } from '../types';
 import type { Unit } from './unit';
 
-export type StructureKind = 'base' | 'wall' | 'tower' | 'mine' | 'cart';
+export type StructureKind = 'base' | 'wall' | 'tower' | 'mine' | 'cart' | 'house' | 'market';
+
+export type MineOwner = 'neutral' | 'player' | 'enemy';
 
 export interface Structure {
   kind: StructureKind;
@@ -22,6 +24,10 @@ export interface Structure {
   attackTimer: number;
   attackTarget: Unit | null;
   flashTimer: number;
+  owner?: MineOwner;
+  captureProgress?: number;
+  playerBuilt?: boolean;
+  creativeId?: number;
 }
 
 export function createBase(): Structure {
@@ -51,6 +57,29 @@ export function createBaseAt(x: number, y: number): Structure {
   };
 }
 
+export function createEnemyBaseAt(x: number, y: number): Structure {
+  const r = CONFIG.base.radius;
+  return {
+    kind: 'base',
+    team: 'enemy',
+    x,
+    y,
+    hp: CONFIG.adventure.enemyBaseHp,
+    maxHp: CONFIG.adventure.enemyBaseHp,
+    radius: r,
+    color: '#ff4655',
+    alive: true,
+    w: r * 2,
+    h: r * 2,
+    damage: 0,
+    attackRange: 0,
+    attackCooldown: 0,
+    attackTimer: 0,
+    attackTarget: null,
+    flashTimer: 0,
+  };
+}
+
 export function createMines(): Structure[] {
   const base = CONFIG.positions.base;
   const off = CONFIG.castle.mineOffset;
@@ -60,11 +89,11 @@ export function createMines(): Structure[] {
   ];
 }
 
-export function createMineAt(x: number, y: number): Structure {
-  return mineAt(x, y);
+export function createMineAt(x: number, y: number, owner: MineOwner = 'player'): Structure {
+  return mineAt(x, y, owner);
 }
 
-function mineAt(x: number, y: number): Structure {
+function mineAt(x: number, y: number, owner: MineOwner = 'player'): Structure {
   const r = CONFIG.mine.radius;
   return {
     kind: 'mine',
@@ -84,6 +113,8 @@ function mineAt(x: number, y: number): Structure {
     attackTimer: 0,
     attackTarget: null,
     flashTimer: 0,
+    owner,
+    captureProgress: 0,
   };
 }
 

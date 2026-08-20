@@ -67,7 +67,7 @@ export function updateBossAbilities(
       scratch.length = 0;
       grid.queryCircle(boss.x, boss.y, ab.radius, scratch);
       for (const u of scratch) {
-        if (!u.alive || u.team !== 'player') continue;
+        if (!u.alive || u.team === boss.team) continue;
         const dx = u.x - boss.x;
         const dy = u.y - boss.y;
         if (dx * dx + dy * dy <= radiusSq) {

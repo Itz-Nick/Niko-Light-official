@@ -63,14 +63,14 @@ export function spawnArrow(
   };
 }
 
-export function spawnTowerShot(x: number, y: number, damage: number, target: Unit): Projectile {
+export function spawnTowerShot(x: number, y: number, damage: number, target: Unit, team: Team): Projectile {
   const dx = target.x - x;
   const dy = target.y - y;
   const d = Math.hypot(dx, dy) || 1;
   const speed = CONFIG.projectiles.arrowSpeed;
   return {
     id: nextProjectileId++,
-    team: 'player',
+    team,
     x,
     y,
     vx: (dx / d) * speed,

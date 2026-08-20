@@ -7,10 +7,14 @@ export class Camera {
   zoom: number;
   private viewWidth: number;
   private viewHeight: number;
+  private worldW: number;
+  private worldH: number;
 
   constructor(viewWidth: number, viewHeight: number) {
     this.viewWidth = viewWidth;
     this.viewHeight = viewHeight;
+    this.worldW = CONFIG.world.width;
+    this.worldH = CONFIG.world.height;
     this.x = CONFIG.positions.base.x;
     this.y = CONFIG.positions.base.y;
     this.zoom = 0.9;
@@ -21,6 +25,17 @@ export class Camera {
     this.viewHeight = height;
   }
 
+  setWorldSize(width: number, height: number): void {
+    this.worldW = width;
+    this.worldH = height;
+    this.x = clamp(this.x, 0, width);
+    this.y = clamp(this.y, 0, height);
+  }
+
+  bounds(): { w: number; h: number } {
+    return { w: this.worldW, h: this.worldH };
+  }
+
   screenToWorld(sx: number, sy: number): { x: number; y: number } {
     return {
       x: (sx - this.viewWidth / 2) / this.zoom + this.x,
@@ -29,8 +44,8 @@ export class Camera {
   }
 
   move(dx: number, dy: number): void {
-    this.x = clamp(this.x + dx, 0, CONFIG.world.width);
-    this.y = clamp(this.y + dy, 0, CONFIG.world.height);
+    this.x = clamp(this.x + dx, 0, this.worldW);
+    this.y = clamp(this.y + dy, 0, this.worldH);
   }
 
   zoomAt(sx: number, sy: number, factor: number): void {
@@ -39,8 +54,8 @@ export class Camera {
     const after = this.screenToWorld(sx, sy);
     this.x += before.x - after.x;
     this.y += before.y - after.y;
-    this.x = clamp(this.x, 0, CONFIG.world.width);
-    this.y = clamp(this.y, 0, CONFIG.world.height);
+    this.x = clamp(this.x, 0, this.worldW);
+    this.y = clamp(this.y, 0, this.worldH);
   }
 
   viewRect(): { x: number; y: number; w: number; h: number } {

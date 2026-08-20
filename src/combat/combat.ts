@@ -29,7 +29,7 @@ export function updateCombat(
     u.thinkTimer -= dt;
     u.flashTimer = Math.max(0, u.flashTimer - dt);
 
-    if (u.team === 'player' && u.moveTarget !== null) {
+    if (u.team === 'player' && u.moveTarget !== null && !u.aiControl) {
       u.attackTarget = null;
       continue;
     }
@@ -54,6 +54,22 @@ export function updateCombat(
       }
     }
 
+    if (u.team === 'player') {
+      if (u.structureTarget && (!u.structureTarget.alive || u.structureTarget.team === 'player')) {
+        u.structureTarget = null;
+      }
+      if (!u.attackTarget && !u.structureTarget) {
+        u.structureTarget = findEnemyStructureInRange(u, structures);
+      }
+    }
+
+    if (u.aiControl) {
+      if (u.structureTarget && (!u.structureTarget.alive || u.structureTarget.team === u.team)) {
+        u.structureTarget = null;
+      }
+      continue;
+    }
+
     if (u.team === 'enemy') {
       if (u.attackTarget) {
         u.structureTarget = null;
@@ -61,32 +77,58 @@ export function updateCombat(
         u.flankPoint = null;
       } else if (u.troopType === 'boss') {
         bossStructureThink(u, structures);
-      } else {
-        const wall = blockingWall(u, structures);
-        if (wall) {
-          u.structureTarget = wall;
+      } else if (u.defendPoint) {
+        // adventure defenders: hold near home, react to nearby foes.
+        // if a player base ends up in reach (defenders were lured there),
+        // siege it so defeat remains possible.
+        const blocked = blockingBuilding(u, structures, u.defendPoint);
+        if (blocked) {
+          u.structureTarget = blocked;
+          u.flankPoint = null;
         } else {
-          const primary = findPrimaryStructure(structures, u);
-          if (primary) {
-            if (u.flankPoint) {
-              const dx = u.flankPoint.x - u.x;
-              const dy = u.flankPoint.y - u.y;
-              if (dx * dx + dy * dy < 150 * 150) u.flankPoint = null;
-            }
-            if (u.flankPoint) {
-              u.advanceTarget = { x: u.flankPoint.x, y: u.flankPoint.y };
-            } else {
-              u.advanceTarget = enemyDestination(u, primary);
-            }
-            if (inStructureRange(u, primary)) {
-              u.structureTarget = primary;
-            } else {
-              const mine = findMineInRange(u, structures, u.searchRadius);
-              u.structureTarget = mine && inStructureRange(u, mine) ? mine : null;
-            }
-          } else {
+          const primary = findPlayerStructure(structures, u);
+          if (primary && inStructureRange(u, primary)) {
+            u.structureTarget = primary;
             u.advanceTarget = null;
+            u.flankPoint = null;
+          } else {
             u.structureTarget = null;
+            u.advanceTarget = u.defendPoint;
+            u.flankPoint = null;
+          }
+        }
+      } else {
+        const blocked = blockingBuilding(u, structures, u.advanceTarget);
+        if (blocked) {
+          u.structureTarget = blocked;
+          u.flankPoint = null;
+        } else {
+          const wall = blockingWall(u, structures);
+          if (wall) {
+            u.structureTarget = wall;
+          } else {
+            const primary = findPrimaryStructure(structures, u);
+            if (primary) {
+              if (u.flankPoint) {
+                const dx = u.flankPoint.x - u.x;
+                const dy = u.flankPoint.y - u.y;
+                if (dx * dx + dy * dy < 150 * 150) u.flankPoint = null;
+              }
+              if (u.flankPoint) {
+                u.advanceTarget = { x: u.flankPoint.x, y: u.flankPoint.y };
+              } else {
+                u.advanceTarget = enemyDestination(u, primary);
+              }
+              if (inStructureRange(u, primary)) {
+                u.structureTarget = primary;
+              } else {
+                const mine = findMineInRange(u, structures, u.searchRadius);
+                u.structureTarget = mine && inStructureRange(u, mine) ? mine : null;
+              }
+            } else {
+              u.advanceTarget = null;
+              u.structureTarget = null;
+            }
           }
         }
       }
@@ -172,6 +214,12 @@ function bossStructureThink(u: Unit, structures: Structure[]): void {
       return;
     }
   }
+  const blocked = blockingBuilding(u, structures, u.advanceTarget);
+  if (blocked) {
+    u.structureTarget = blocked;
+    u.flankPoint = null;
+    return;
+  }
   const wall = blockingWall(u, structures);
   if (wall) {
     u.structureTarget = wall;
@@ -244,6 +292,23 @@ function findPrimaryStructure(structures: Structure[], u: Unit): Structure | nul
   return best;
 }
 
+function findPlayerStructure(structures: Structure[], u: Unit): Structure | null {
+  let best: Structure | null = null;
+  let bestSq = Infinity;
+  for (const s of structures) {
+    if (!s.alive || s.team !== 'player') continue;
+    if (s.kind !== 'cart' && s.kind !== 'base') continue;
+    const dx = s.x - u.x;
+    const dy = s.y - u.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestSq) {
+      bestSq = d;
+      best = s;
+    }
+  }
+  return best;
+}
+
 function findMineInRange(u: Unit, structures: Structure[], radius: number): Structure | null {
   let best: Structure | null = null;
   let bestSq = Infinity;
@@ -272,6 +337,62 @@ function inStructureRange(u: Unit, s: Structure): boolean {
   const dy = s.y - u.y;
   const range = u.attackRange + s.radius;
   return dx * dx + dy * dy <= range * range;
+}
+
+function findEnemyStructureInRange(u: Unit, structures: Structure[]): Structure | null {
+  let best: Structure | null = null;
+  let bestSq = Infinity;
+  for (const s of structures) {
+    if (!s.alive || s.team === 'player') continue;
+    if (!inStructureRange(u, s)) continue;
+    const dx = s.x - u.x;
+    const dy = s.y - u.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestSq) {
+      bestSq = d;
+      best = s;
+    }
+  }
+  return best;
+}
+
+function blockingBuilding(
+  u: Unit,
+  structures: Structure[],
+  dest: { x: number; y: number } | null,
+): Structure | null {
+  if (!dest) return null;
+  for (const s of structures) {
+    if (!s.alive || !s.playerBuilt) continue;
+    const dx = s.x - u.x;
+    const dy = s.y - u.y;
+    const contact = s.radius + u.radius + 6;
+    if (dx * dx + dy * dy > contact * contact) continue;
+    if (segmentHitsCircle(u.x, u.y, dest.x, dest.y, s.x, s.y, s.radius + u.radius)) return s;
+  }
+  return null;
+}
+
+function segmentHitsCircle(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  cx: number,
+  cy: number,
+  r: number,
+): boolean {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return false;
+  let t = ((cx - x0) * dx + (cy - y0) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const px = x0 + t * dx;
+  const py = y0 + t * dy;
+  const ddx = px - cx;
+  const ddy = py - cy;
+  return ddx * ddx + ddy * ddy <= r * r;
 }
 
 function blockingWall(u: Unit, structures: Structure[]): Structure | null {

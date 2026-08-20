@@ -34,6 +34,7 @@ export interface UnitScale {
   speed: number;
   attackRange: number;
   attackCooldown: number;
+  defense: number;
 }
 
 export interface HitInfo {

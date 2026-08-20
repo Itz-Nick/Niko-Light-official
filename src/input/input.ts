@@ -9,6 +9,7 @@ export type InputEvent =
   | { type: 'move'; x: number; y: number }
   | { type: 'recruit'; troopType: PlayerTroopType }
   | { type: 'formation'; kind: FormationKind }
+  | { type: 'rotate' }
   | { type: 'pause' };
 
 export interface DragRect {
@@ -42,6 +43,7 @@ export class Input {
       if (e.code === 'KeyV' && !e.repeat) this.events.push({ type: 'formation', kind: 'v' });
       if (e.code === 'KeyQ' && !e.repeat) this.events.push({ type: 'formation', kind: 'square' });
       if (e.code === 'KeyB' && !e.repeat) this.events.push({ type: 'formation', kind: 'defense' });
+      if (e.code === 'KeyR' && !e.repeat) this.events.push({ type: 'rotate' });
       if (e.code === 'Escape' && !e.repeat) this.events.push({ type: 'pause' });
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -102,6 +104,10 @@ export class Input {
       },
       { passive: false },
     );
+  }
+
+  pointerScreen(): { x: number; y: number } {
+    return { x: this.mouseX, y: this.mouseY };
   }
 
   drainEvents(): InputEvent[] {

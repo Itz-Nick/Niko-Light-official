@@ -1,4 +1,5 @@
 import { CONFIG } from '../config';
+import type { Difficulty } from '../config';
 import { createUnit } from '../entities/unit';
 import type { Unit } from '../entities/unit';
 import { ROLE_BY_TYPE } from '../types';
@@ -31,10 +32,15 @@ export class WaveManager {
 
   private pending: PendingSpawn[] = [];
   private sink: ((u: Unit) => void) | null = null;
-  private scale: UnitScale = unitScaleForWave(0);
+  private scale: UnitScale = unitScaleForWave(0, 'medium');
+  private difficulty: Difficulty = 'medium';
 
   setSpawnSink(sink: (u: Unit) => void): void {
     this.sink = sink;
+  }
+
+  setDifficulty(difficulty: Difficulty): void {
+    this.difficulty = difficulty;
   }
 
   reset(): void {
@@ -42,7 +48,7 @@ export class WaveManager {
     this.phase = 'preparation';
     this.timer = CONFIG.waves.prepTime;
     this.pending = [];
-    this.scale = unitScaleForWave(0);
+    this.scale = unitScaleForWave(0, this.difficulty);
   }
 
   beginBattle(): void {
@@ -75,7 +81,7 @@ export class WaveManager {
   private startBattle(): void {
     this.wave += 1;
     this.phase = 'battle';
-    this.scale = unitScaleForWave(this.wave);
+    this.scale = unitScaleForWave(this.wave, this.difficulty);
     this.pending = this.buildWave(this.wave);
   }
 
@@ -86,13 +92,11 @@ export class WaveManager {
   }
 
   private buildWave(wave: number): PendingSpawn[] {
-    const count = Math.min(
-      Math.floor(CONFIG.waves.baseCount * Math.pow(CONFIG.waves.growth, wave - 1)),
-      CONFIG.waves.maxPerWave,
-    );
+    const raw = CONFIG.waves.baseCount * Math.pow(CONFIG.waves.growth, wave - 1) * CONFIG.difficulty[this.difficulty].spawnScaling;
+    const count = Math.min(Math.floor(raw), CONFIG.waves.maxPerWave);
     const points = CONFIG.positions.enemySpawns;
     const base = CONFIG.positions.base;
-    const tier = enemyTier(wave);
+    const tier = enemyTier(wave, this.difficulty);
     const pending: PendingSpawn[] = [];
     for (let i = 0; i < count; i++) {
       const point = points[Math.floor(i / CONFIG.waves.clusterSize) % points.length];
@@ -133,11 +137,12 @@ export class WaveManager {
   }
 }
 
-function enemyTier(wave: number): number {
-  if (wave <= 5) return 1;
-  if (wave <= 10) return 2;
-  if (wave <= 15) return 3;
-  if (wave <= 20) return 4;
+function enemyTier(wave: number, difficulty: Difficulty): number {
+  const w = wave * CONFIG.difficulty[difficulty].compositionScaling;
+  if (w <= 5) return 1;
+  if (w <= 10) return 2;
+  if (w <= 15) return 3;
+  if (w <= 20) return 4;
   return 5;
 }
 
@@ -146,13 +151,15 @@ function pickEnemyType(tier: number): TroopType {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function unitScaleForWave(wave: number): UnitScale {
+function unitScaleForWave(wave: number, difficulty: Difficulty): UnitScale {
   const k = wave - 1;
+  const d = CONFIG.difficulty[difficulty];
   return {
-    hp: Math.min(CONFIG.waves.hpCap, 1 + k * CONFIG.waves.hpGrowth),
-    damage: Math.min(CONFIG.waves.damageCap, 1 + k * CONFIG.waves.damageGrowth),
-    speed: Math.min(CONFIG.waves.speedCap, 1 + k * CONFIG.waves.speedGrowth),
-    attackRange: Math.min(CONFIG.waves.rangeCap, 1 + k * CONFIG.waves.rangeGrowth),
-    attackCooldown: Math.max(CONFIG.waves.cooldownMin, 1 - k * CONFIG.waves.cooldownGrowth),
+    hp: Math.min(CONFIG.waves.hpCap, 1 + k * CONFIG.waves.hpGrowth * d.enemyScaling),
+    damage: Math.min(CONFIG.waves.damageCap, 1 + k * CONFIG.waves.damageGrowth * d.enemyScaling),
+    speed: Math.min(CONFIG.waves.speedCap, 1 + k * CONFIG.waves.speedGrowth * d.enemyScaling),
+    attackRange: Math.min(CONFIG.waves.rangeCap, 1 + k * CONFIG.waves.rangeGrowth * d.enemyScaling),
+    attackCooldown: Math.max(CONFIG.waves.cooldownMin, 1 - k * CONFIG.waves.cooldownGrowth * d.enemyScaling),
+    defense: Math.min(0.25, k * d.defenseGrowth),
   };
 }

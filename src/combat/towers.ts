@@ -28,7 +28,7 @@ export function updateTowers(
       let best: Unit | null = null;
       let bestScore = Infinity;
       for (const c of candidates) {
-        if (!c.alive || c.team !== 'enemy') continue;
+        if (!c.alive || c.team === t.team) continue;
         const score = towerPriority(t, c, structures);
         if (score < bestScore) {
           bestScore = score;
@@ -38,7 +38,7 @@ export function updateTowers(
       t.attackTarget = best;
     }
     if (t.attackTarget && t.attackTimer <= 0) {
-      projectiles.push(spawnTowerShot(t.x, t.y, t.damage, t.attackTarget));
+      projectiles.push(spawnTowerShot(t.x, t.y, t.damage, t.attackTarget, t.team));
       t.attackTimer = t.attackCooldown;
       t.flashTimer = CONFIG.ui.hitFlashDuration;
       shots++;

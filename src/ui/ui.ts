@@ -1,16 +1,30 @@
 import { CONFIG } from '../config';
+import type { Difficulty } from '../config';
 import type { Economy } from '../economy/economy';
 import type { SettingsStore } from '../settings/settings';
 import type { CampaignStore } from '../story/campaign';
 import { levelMeta } from '../story/levels';
-import type { LevelDef, LevelStats } from '../story/story';
+import { formatTime } from '../story/story';
+import type { LevelDef, LevelStats, StatLine } from '../story/story';
 import type { PlayerTroopType, TroopType } from '../types';
-import type { UpgradeDef, UpgradeId } from '../upgrades/upgrades';
+import type { BuildingKind, ProgressionSnapshot } from '../progression/progression';
 import type { WaveManager } from '../waves/wave-manager';
+import { TERRITORY_COLS, TERRITORY_ROWS } from '../adventure/territory';
+import type { CreativePick, CreativeTeam } from '../creative/creative';
+
+export interface AdventureStats {
+  time: number;
+  territories: number;
+  minesCaptured: number;
+  minesTotal: number;
+}
 
 type ScreenName =
   | 'menu'
   | 'modes'
+  | 'difficulty'
+  | 'creative'
+  | 'creative-editor'
   | 'pause'
   | 'settings'
   | 'controls'
@@ -20,12 +34,18 @@ type ScreenName =
   | 'storywin'
   | 'storyteaser'
   | 'storylose'
-  | 'campaigncomplete';
+  | 'campaigncomplete'
+  | 'advwin'
+  | 'advlose'
+  | 'creativresult';
 type UnderlyingScreen = 'menu' | 'pause';
 
 const SCREENS: ScreenName[] = [
   'menu',
   'modes',
+  'difficulty',
+  'creative',
+  'creative-editor',
   'pause',
   'settings',
   'controls',
@@ -36,6 +56,9 @@ const SCREENS: ScreenName[] = [
   'storyteaser',
   'storylose',
   'campaigncomplete',
+  'advwin',
+  'advlose',
+  'creativresult',
 ];
 
 const ARMY_TYPES: PlayerTroopType[] = ['knight', 'archer', 'tank', 'champion'];
@@ -48,9 +71,32 @@ const ARMY_NAMES: Record<TroopType, string> = {
   boss: 'Senhor da Ruína',
 };
 
+function starsHtml(stars: number): string {
+  const s = Math.max(0, Math.min(3, stars));
+  return `${'⭐'.repeat(s)}<span class="stars-dim">${'⭐'.repeat(3 - s)}</span>`;
+}
+
+function performanceText(stars: number): string {
+  if (stars >= 3) return 'Desempenho excepcional!';
+  if (stars === 2) return 'Bom trabalho!';
+  return 'Missão cumprida!';
+}
+
 interface UiHandlers {
   onOpenModes: () => void;
   onPlayInfinite: () => void;
+  onDifficultySelect: (difficulty: Difficulty) => void;
+  onDifficultyBack: () => void;
+  onPlayAdventure: () => void;
+  onPlayCreative: () => void;
+  onCreativeBack: () => void;
+  onCreativeStart: () => void;
+  onCreativeEditorBack: () => void;
+  onCreativeTeam: (team: CreativeTeam) => void;
+  onCreativePick: (pick: CreativePick) => void;
+  onCreativeRemove: () => void;
+  onCreativeStartBattle: () => void;
+  onCoopLocked?: () => void;
   onBackToMenu: () => void;
   onOpenStory: () => void;
   onStoryBack: () => void;
@@ -65,10 +111,24 @@ interface UiHandlers {
   onCampaignCompleteMenu: () => void;
   onStoryLoseRetry: () => void;
   onStoryLoseMenu: () => void;
+  onAdventureWinRestart: () => void;
+  onAdventureWinContinue: () => void;
+  onAdventureWinMenu: () => void;
+  onAdventureLoseRetry: () => void;
+  onAdventureLoseContinent: () => void;
+  onAdventureLoseMenu: () => void;
+  onCreativeRetry: () => void;
+  onCreativeEdit: () => void;
+  onCreativeResultMenu: () => void;
+  onCreativeSpeed: (speed: 1 | 2 | 4) => void;
+  onCreativePause: () => void;
   onResume: () => void;
   onQuitToMenu: () => void;
   onRestart: () => void;
-  onUpgrade: (id: UpgradeId) => void;
+  onToggleProgress: () => void;
+  onUpgradeCastle: () => void;
+  onUpgradeTroop: (type: PlayerTroopType) => void;
+  onBuild: (kind: BuildingKind) => void;
   onStartWave: () => void;
   onRecruit?: (type: PlayerTroopType) => void;
   onSettingsChange?: () => void;
@@ -78,6 +138,8 @@ export class Ui {
   private readonly els: Record<ScreenName, HTMLElement>;
   private current: ScreenName | null = null;
   private underlying: UnderlyingScreen = 'menu';
+  private transitionTimer: number | null = null;
+  private transitionOutgoing: HTMLElement | null = null;
   private readonly hudEl: HTMLElement;
   private readonly goldEl: HTMLElement;
   private readonly goldGainEl: HTMLElement;
@@ -90,7 +152,23 @@ export class Ui {
   private readonly prepEl: HTMLElement;
   private readonly prepBannerEl: HTMLElement;
   private readonly prepCountdownEl: HTMLElement;
-  private readonly upgradesEl: HTMLElement;
+  private readonly progressionEl: HTMLElement;
+  private readonly blockProgressEl: HTMLElement;
+  private readonly progressHudEl: HTMLElement;
+  private readonly progDiamondsEl: HTMLElement;
+  private readonly progCastlePipsEl: HTMLElement;
+  private readonly progCastleInfoEl: HTMLElement;
+  private readonly progCastleBtnEl: HTMLButtonElement;
+  private readonly progTroopsEl: HTMLElement;
+  private readonly progBuildCountEl: HTMLElement;
+  private readonly progBuildInfoEl: HTMLElement;
+  private readonly buildHouseEl: HTMLButtonElement;
+  private readonly buildMarketEl: HTMLButtonElement;
+  private readonly buildTowerEl: HTMLButtonElement;
+  private readonly buildHintEl: HTMLElement;
+  private placing: BuildingKind | null = null;
+  private progressionVisibleState = false;
+  private lastProgressionKey = '';
   private readonly finalWaveEl: HTMLElement;
   private readonly armyEls: Record<PlayerTroopType, HTMLButtonElement>;
   private readonly statEls: Record<'gold' | 'wave' | 'troops' | 'army' | 'base' | 'cart', HTMLElement>;
@@ -99,10 +177,16 @@ export class Ui {
   private readonly tutorialEl: HTMLElement;
   private readonly tutorialTextEl: HTMLElement;
   private readonly storyWinTitleEl: HTMLElement;
+  private readonly storyWinSubtitleEl: HTMLElement;
   private readonly storyWinStarsEl: HTMLElement;
-  private readonly storyWinTextEl: HTMLElement;
+  private readonly storyWinObjectiveEl: HTMLElement;
+  private readonly storyWinStatsEl: HTMLElement;
   private readonly storyWinUnlockEl: HTMLElement;
   private readonly storyLoseTextEl: HTMLElement;
+  private readonly storyLoseStatsEl: HTMLElement;
+  private readonly campaignProgressFillEl: HTMLElement;
+  private readonly campaignProgressTextEl: HTMLElement;
+  private readonly campaignProgressStarsEl: HTMLElement;
   private readonly storyTeaserTitleEl: HTMLElement;
   private readonly storyTeaserStarsEl: HTMLElement;
   private readonly storyTeaserNarrationEl: HTMLElement;
@@ -117,11 +201,22 @@ export class Ui {
   private readonly campaignBannerEl: HTMLElement;
   private readonly toastEl: HTMLElement;
   private readonly prepSecsEl: HTMLElement;
+  private readonly blockResourcesEl: HTMLElement;
+  private readonly blockWaveEl: HTMLElement;
+  private readonly blockModeEl: HTMLElement;
+  private readonly blockAdventureEl: HTMLElement;
+  private readonly objectiveBannerEl: HTMLElement;
+  private readonly enemyCastleBarEl: HTMLElement;
+  private readonly enemyCastleFillEl: HTMLElement;
+  private readonly enemyCastleHpEl: HTMLElement;
   private toastTimer: number | null = null;
+  private coopLockTimer: number | null = null;
+  private hardcoreLockTimer: number | null = null;
   private readonly last = {
     gold: -1,
     wave: -1,
     units: -1,
+    unitCap: -1,
     countdown: -1,
     hpPct: -1,
     army: '',
@@ -129,8 +224,9 @@ export class Ui {
     storyUnits: -1,
     storyFps: -1,
     bossPct: -1,
+    enemyHpPct: -1,
+    advArmy: '',
   };
-  private lastUpgradeKey = '';
 
   constructor(
     private readonly settings: SettingsStore,
@@ -140,6 +236,9 @@ export class Ui {
     this.els = {
       menu: this.el('menu'),
       modes: this.el('modes'),
+      difficulty: this.el('difficulty'),
+      creative: this.el('creative'),
+      'creative-editor': this.el('creative-editor'),
       pause: this.el('pause'),
       settings: this.el('settings'),
       controls: this.el('controls'),
@@ -150,6 +249,9 @@ export class Ui {
       storyteaser: this.el('storyteaser'),
       storylose: this.el('storylose'),
       campaigncomplete: this.el('campaigncomplete'),
+      advwin: this.el('advwin'),
+      advlose: this.el('advlose'),
+      creativresult: this.el('creativresult'),
     };
     this.hudEl = this.el('hud');
     this.goldEl = this.el('gold');
@@ -163,7 +265,20 @@ export class Ui {
     this.prepEl = this.el('prep');
     this.prepBannerEl = this.el('prepBanner');
     this.prepCountdownEl = this.el('prepCountdown');
-    this.upgradesEl = this.el('upgrades');
+    this.progressionEl = this.el('progression');
+    this.blockProgressEl = this.el('block-progress');
+    this.progressHudEl = this.el('prog-hud');
+    this.progDiamondsEl = this.el('prog-diamonds');
+    this.progCastlePipsEl = this.el('prog-castle-pips');
+    this.progCastleInfoEl = this.el('prog-castle-info');
+    this.progCastleBtnEl = this.el<HTMLButtonElement>('prog-castle-btn');
+    this.progTroopsEl = this.el('prog-troops');
+    this.progBuildCountEl = this.el('prog-build-count');
+    this.progBuildInfoEl = this.el('prog-build-info');
+    this.buildHouseEl = this.el<HTMLButtonElement>('prog-build-house');
+    this.buildMarketEl = this.el<HTMLButtonElement>('prog-build-market');
+    this.buildTowerEl = this.el<HTMLButtonElement>('prog-build-tower');
+    this.buildHintEl = this.el('build-hint');
     this.finalWaveEl = this.el('finalWave');
     this.armyEls = {
       knight: this.el<HTMLButtonElement>('army-knight'),
@@ -184,10 +299,16 @@ export class Ui {
     this.tutorialEl = this.el('tutorial');
     this.tutorialTextEl = this.el('tutorialText');
     this.storyWinTitleEl = this.el('storyWinTitle');
+    this.storyWinSubtitleEl = this.el('storyWinSubtitle');
     this.storyWinStarsEl = this.el('storyWinStars');
-    this.storyWinTextEl = this.el('storyWinText');
+    this.storyWinObjectiveEl = this.el('storyWinObjective');
+    this.storyWinStatsEl = this.el('storyWinStats');
     this.storyWinUnlockEl = this.el('storyWinUnlock');
     this.storyLoseTextEl = this.el('storyLoseText');
+    this.storyLoseStatsEl = this.el('storyLoseStats');
+    this.campaignProgressFillEl = this.el('campaignProgressFill');
+    this.campaignProgressTextEl = this.el('campaignProgressText');
+    this.campaignProgressStarsEl = this.el('campaignProgressStars');
     this.storyTeaserTitleEl = this.el('storyTeaserTitle');
     this.storyTeaserStarsEl = this.el('storyTeaserStars');
     this.storyTeaserNarrationEl = this.el('storyTeaserNarration');
@@ -202,9 +323,18 @@ export class Ui {
     this.campaignBannerEl = this.el('campaignBanner');
     this.toastEl = this.el('toast');
     this.prepSecsEl = this.el('prepSecs');
+    this.blockResourcesEl = this.el('block-resources');
+    this.blockWaveEl = this.el('block-wave');
+    this.blockModeEl = this.el('block-mode');
+    this.blockAdventureEl = this.el('block-adventure');
+    this.objectiveBannerEl = this.el('objectiveBanner');
+    this.enemyCastleBarEl = this.el('enemyCastleBar');
+    this.enemyCastleFillEl = this.el('enemyCastleFill');
+    this.enemyCastleHpEl = this.el('enemyCastleHp');
     this.initScreens();
     this.initSettings();
     this.initArmy();
+    this.initProgressionPanel();
   }
 
   updateHud(
@@ -215,6 +345,7 @@ export class Ui {
     baseMaxHp: number,
     fps: number,
     troopCounts: Record<TroopType, number>,
+    cap: number,
   ): void {
     const gold = Math.floor(economy.gold);
     if (this.last.gold !== gold) {
@@ -225,9 +356,10 @@ export class Ui {
       this.last.wave = waves.wave;
       this.waveEl.textContent = waves.wave.toString();
     }
-    if (this.last.units !== unitCount) {
+    if (this.last.units !== unitCount || this.last.unitCap !== cap) {
       this.last.units = unitCount;
-      this.unitsEl.textContent = unitCount.toString();
+      this.last.unitCap = cap;
+      this.unitsEl.textContent = `${unitCount}/${cap}`;
     }
     const hpPct = Math.max(0, Math.ceil((baseHp / baseMaxHp) * 100));
     if (this.last.hpPct !== hpPct) {
@@ -243,7 +375,7 @@ export class Ui {
     this.waveStatusEl.classList.toggle('battle', battle);
     this.waveStatusEl.classList.toggle('prep', !battle);
     this.updateFps(fps);
-    this.updateArmy(economy, unitCount, troopCounts);
+    this.updateArmy(economy, unitCount, troopCounts, cap, false);
   }
 
   updateStoryHud(
@@ -293,6 +425,51 @@ export class Ui {
     }
   }
 
+  updateAdventureHud(
+    economy: Economy,
+    unitCount: number,
+    playerBaseHp: number,
+    playerBaseMaxHp: number,
+    enemyBaseHp: number,
+    enemyBaseMaxHp: number,
+    fps: number,
+    cap: number,
+  ): void {
+    const gold = Math.floor(economy.gold);
+    if (this.last.gold !== gold) {
+      this.last.gold = gold;
+      this.goldEl.textContent = gold.toString();
+    }
+    if (this.last.units !== unitCount || this.last.unitCap !== cap) {
+      this.last.units = unitCount;
+      this.last.unitCap = cap;
+      this.unitsEl.textContent = `${unitCount}/${cap}`;
+    }
+    const army = `${unitCount}/${cap}`;
+    if (this.last.advArmy !== army) {
+      this.last.advArmy = army;
+      this.statEls.army.title = `Exército: ${army}`;
+    }
+    const pp = playerBaseMaxHp > 0 ? Math.max(0, Math.ceil((playerBaseHp / playerBaseMaxHp) * 100)) : 0;
+    if (this.last.hpPct !== pp) {
+      this.last.hpPct = pp;
+      this.baseFillEl.style.width = `${pp}%`;
+      this.baseHpEl.textContent = `${pp}%`;
+    }
+    this.baseFillEl.classList.toggle('warn', pp > 25 && pp <= 60);
+    this.baseFillEl.classList.toggle('crit', pp <= 25);
+    const ep = enemyBaseMaxHp > 0 ? Math.max(0, Math.ceil((enemyBaseHp / enemyBaseMaxHp) * 100)) : 0;
+    if (this.last.enemyHpPct !== ep) {
+      this.last.enemyHpPct = ep;
+      this.enemyCastleFillEl.style.width = `${ep}%`;
+      this.enemyCastleHpEl.textContent = `${ep}%`;
+    }
+    this.enemyCastleBarEl.classList.toggle('crit', ep <= 25);
+    const counts: Record<TroopType, number> = { knight: unitCount, archer: 0, tank: 0, champion: 0, boss: 0 };
+    this.updateArmy(economy, unitCount, counts, cap, true);
+    this.updateFps(fps);
+  }
+
   private updateFps(fps: number): void {
     if (this.settings.value.showFps) {
       this.fpsEl.hidden = false;
@@ -305,20 +482,30 @@ export class Ui {
     }
   }
 
-  setMode(mode: 'infinite' | 'story'): void {
+  setMode(mode: 'infinite' | 'story' | 'adventures'): void {
     const isStory = mode === 'story';
-    this.statEls.gold.hidden = isStory;
-    this.statEls.wave.hidden = isStory;
+    const isAdv = mode === 'adventures';
+    this.blockResourcesEl.hidden = isStory;
+    this.blockWaveEl.hidden = isStory || isAdv;
     this.statEls.army.hidden = isStory;
-    this.statEls.base.hidden = isStory;
     this.statEls.troops.hidden = false;
-    const armyPanel = this.hudEl.querySelector('.army-panel');
-    if (armyPanel) (armyPanel as HTMLElement).hidden = isStory;
+    if (!isStory) this.statEls.cart.hidden = true;
     this.prepEl.hidden = true;
-    this.upgradesEl.textContent = '';
+    this.blockProgressEl.hidden = isStory;
     this.last.countdown = -1;
+    this.setPlacing(null);
+    this.setProgressionVisible(false);
     this.bossBarEl.hidden = true;
     this.last.bossPct = -1;
+    this.blockModeEl.hidden = !isAdv;
+    this.blockAdventureEl.hidden = !isAdv;
+    this.objectiveBannerEl.hidden = !isAdv;
+    this.enemyCastleBarEl.hidden = !isAdv;
+    if (isAdv) {
+      for (const type of ARMY_TYPES) this.armyEls[type].hidden = type !== 'knight';
+    } else {
+      for (const type of ARMY_TYPES) this.armyEls[type].hidden = false;
+    }
   }
 
   setStoryHud(hasCart: boolean, hasBase: boolean): void {
@@ -338,13 +525,20 @@ export class Ui {
     this.tutorialEl.hidden = true;
   }
 
-  private updateArmy(economy: Economy, playerCount: number, troopCounts: Record<TroopType, number>): void {
-    const key = `${Math.floor(economy.gold)}:${playerCount}:${this.settings.value.maxUnits}:${troopCounts.knight}:${troopCounts.archer}:${troopCounts.tank}:${troopCounts.champion}`;
+  private updateArmy(
+    economy: Economy,
+    playerCount: number,
+    troopCounts: Record<TroopType, number>,
+    cap: number,
+    knightOnly: boolean,
+  ): void {
+    const key = `${Math.floor(economy.gold)}:${playerCount}:${cap}:${troopCounts.knight}:${troopCounts.archer}:${troopCounts.tank}:${troopCounts.champion}:${knightOnly ? 1 : 0}`;
     if (key === this.last.army) return;
     this.last.army = key;
     for (const type of ARMY_TYPES) {
+      if (knightOnly && type !== 'knight') continue;
       const rec = CONFIG.recruits[type];
-      const affordable = economy.canAfford(rec.cost) && playerCount + rec.count <= this.settings.value.maxUnits;
+      const affordable = economy.canAfford(rec.cost) && playerCount + rec.count <= cap;
       this.armyEls[type].disabled = !affordable;
       this.armyEls[type].querySelector('.army-count')!.textContent = troopCounts[type].toString();
       this.armyEls[type].title = affordable
@@ -376,6 +570,32 @@ export class Ui {
     }, CONFIG.ui.toastDuration * 1000);
   }
 
+  private triggerCoopLock(card: HTMLElement): void {
+    if (this.coopLockTimer !== null) window.clearTimeout(this.coopLockTimer);
+    card.classList.remove('lock-shake');
+    void card.offsetWidth;
+    card.classList.add('lock-shake');
+    this.coopLockTimer = window.setTimeout(() => {
+      card.classList.remove('lock-shake');
+      this.coopLockTimer = null;
+    }, 500);
+    this.showToast('COOP · EM DESENVOLVIMENTO', 'alert');
+    this.handlers.onCoopLocked?.();
+  }
+
+  private triggerHardcoreLock(card: HTMLElement): void {
+    if (this.hardcoreLockTimer !== null) window.clearTimeout(this.hardcoreLockTimer);
+    card.classList.remove('lock-shake');
+    void card.offsetWidth;
+    card.classList.add('lock-shake');
+    this.hardcoreLockTimer = window.setTimeout(() => {
+      card.classList.remove('lock-shake');
+      this.hardcoreLockTimer = null;
+    }, 500);
+    this.showToast('HARDCORE · EM DESENVOLVIMENTO', 'alert');
+    this.handlers.onCoopLocked?.();
+  }
+
   flashGoldInsufficient(): void {
     this.goldEl.classList.remove('insufficient');
     void this.goldEl.offsetWidth;
@@ -390,7 +610,7 @@ export class Ui {
     this.goldGainEl.classList.add('gain');
   }
 
-  showPreparation(wave: number, options: UpgradeDef[], secondsLeft: number): void {
+  showPreparation(wave: number, secondsLeft: number): void {
     this.prepEl.hidden = false;
     this.prepBannerEl.textContent = wave === 0 ? 'PREPARAÇÃO' : `WAVE ${wave} COMPLETA`;
     const secs = Math.ceil(secondsLeft);
@@ -401,7 +621,6 @@ export class Ui {
     const warn = secs <= CONFIG.ui.countdownWarnAt;
     this.prepCountdownEl.classList.toggle('warn', warn);
     this.el<HTMLButtonElement>('btn-start-wave').classList.toggle('warn', warn);
-    this.renderUpgrades(options);
   }
 
   hidePreparation(): void {
@@ -416,7 +635,133 @@ export class Ui {
 
   showModes(): void {
     this.hudEl.hidden = true;
+    this.updateModeStoryCard();
     this.show('modes');
+  }
+
+  showDifficulty(): void {
+    this.hudEl.hidden = true;
+    this.show('difficulty');
+  }
+
+  showContinent(): void {
+    this.hudEl.hidden = true;
+    this.fpsEl.hidden = true;
+    this.show(null);
+  }
+
+  showCreative(): void {
+    this.hudEl.hidden = true;
+    this.show('creative');
+  }
+
+  showCreativeEditor(): void {
+    this.hudEl.hidden = true;
+    this.fpsEl.hidden = true;
+    this.show('creative-editor');
+  }
+
+  setCreativeTeam(team: CreativeTeam): void {
+    const blue = this.el<HTMLButtonElement>('creative-team-blue');
+    const red = this.el<HTMLButtonElement>('creative-team-red');
+    blue.classList.toggle('active', team === 'blue');
+    red.classList.toggle('active', team === 'red');
+    const hud = this.el('creative-hud');
+    hud.classList.toggle('team-blue', team === 'blue');
+    hud.classList.toggle('team-red', team === 'red');
+    const label = this.el('creative-current-team');
+    label.textContent = team === 'blue' ? 'TIME ATUAL 🔵 AZUL' : 'TIME ATUAL 🔴 VERMELHO';
+  }
+
+  setCreativePick(pick: CreativePick | null): void {
+    const editor = this.els['creative-editor'];
+    for (const btn of editor.querySelectorAll<HTMLButtonElement>('.palette-btn')) {
+      const active = pick !== null && btn.dataset.creativeKind === pick.kind && btn.dataset.creativeType === pick.type;
+      btn.classList.toggle('active', active);
+    }
+  }
+
+  updateCreativeCounts(blue: number, red: number): void {
+    this.el('creative-count-blue').textContent = String(blue);
+    this.el('creative-count-red').textContent = String(red);
+  }
+
+  setCreativeLocked(locked: boolean): void {
+    const editor = this.els['creative-editor'];
+    for (const btn of editor.querySelectorAll<HTMLButtonElement>('button')) {
+      btn.disabled = locked;
+    }
+    const hud = this.el('creative-hud');
+    hud.classList.toggle('locked', locked);
+    this.el('creative-current-team').hidden = locked;
+    this.el('creative-seg').hidden = locked;
+    this.el('creative-spectator').hidden = !locked;
+    this.el('btn-creative-start').hidden = locked;
+  }
+
+  setCreativeBattleTime(time: number): void {
+    this.el('creative-battle-time').textContent = formatTime(time);
+  }
+
+  setCreativeTroopCounts(blue: number, red: number): void {
+    this.el('creative-blue-count').textContent = String(blue);
+    this.el('creative-red-count').textContent = String(red);
+  }
+
+  setCreativeSpeed(speed: 1 | 2 | 4): void {
+    for (const btn of this.els['creative-editor'].querySelectorAll<HTMLButtonElement>('.spec-speed-btn')) {
+      btn.classList.toggle('active', Number(btn.dataset.speed) === speed);
+    }
+  }
+
+  showCreativeResult(winner: CreativeTeam, time: number, blueRemaining: number, redRemaining: number, blueKills: number, redKills: number, blueLosses: number, redLosses: number): void {
+    this.el('creativeResultTitle').textContent = '⚔️ BATALHA FINALIZADA';
+    const winnerEl = this.el('creativeResultWinner');
+    winnerEl.textContent = winner === 'blue' ? '🔵 AZUL VENCEU' : '🔴 VERMELHO VENCEU';
+    winnerEl.classList.toggle('winner-blue', winner === 'blue');
+    winnerEl.classList.toggle('winner-red', winner === 'red');
+    this.el('creativeResultTime').textContent = formatTime(time);
+    this.el('creativeResultBlueTroops').textContent = String(blueRemaining);
+    this.el('creativeResultRedTroops').textContent = String(redRemaining);
+    this.el('creativeResultBlueKills').textContent = String(blueKills);
+    this.el('creativeResultRedKills').textContent = String(redKills);
+    this.el('creativeResultBlueLosses').textContent = String(blueLosses);
+    this.el('creativeResultRedLosses').textContent = String(redLosses);
+    this.hudEl.hidden = true;
+    this.show('creativresult');
+  }
+
+  private updateModeStoryCard(): void {
+    const { completed, stars } = this.campaignProgress();
+    const prog = this.el('mode-story-progress');
+    prog.hidden = false;
+    this.el('mode-story-progress-text').textContent = `${completed} / 10 fases`;
+    const bar = this.el('mode-story-stars');
+    bar.textContent = '';
+    for (let i = 0; i < 10; i++) {
+      const seg = document.createElement('span');
+      seg.className = `seg${i < completed ? ' on' : ''}`;
+      bar.appendChild(seg);
+    }
+    const desc = this.el('mode-story-desc');
+    desc.textContent = `Campanha narrativa com 10 fases progressivas e uma batalha final. ${stars} de 30 estrelas.`;
+  }
+
+  private campaignProgress(): { completed: number; stars: number } {
+    let completed = 0;
+    let stars = 0;
+    for (let n = 1; n <= 10; n++) {
+      if (this.campaign.isCompleted(n)) completed++;
+      stars += this.campaign.starsOf(n);
+    }
+    return { completed, stars };
+  }
+
+  private updateCampaignProgress(): void {
+    const { completed, stars } = this.campaignProgress();
+    this.campaignProgressFillEl.style.width = `${(completed / 10) * 100}%`;
+    this.campaignProgressTextEl.textContent = `${completed} de 10`;
+    this.campaignProgressStarsEl.textContent = `★ ${stars} / 30`;
   }
 
   showStorySelect(): void {
@@ -429,18 +774,27 @@ export class Ui {
     const grid = this.el('storyGrid');
     grid.textContent = '';
     this.campaignBannerEl.hidden = !this.campaign.isComplete();
+    this.updateCampaignProgress();
+    let firstAvailable = 0;
+    for (let n = 1; n <= 10; n++) {
+      if (this.campaign.isUnlocked(n) && !this.campaign.isCompleted(n)) {
+        firstAvailable = n;
+        break;
+      }
+    }
     for (let n = 1; n <= 10; n++) {
       const meta = levelMeta(n);
       const unlocked = this.campaign.isUnlocked(n);
       const completed = this.campaign.isCompleted(n);
       const stars = this.campaign.starsOf(n);
+      const isNext = unlocked && !completed && n === firstAvailable;
       const card = document.createElement('div');
-      card.className = `story-card ${completed ? 'story-completed' : unlocked ? 'story-available' : 'story-locked'}`;
+      card.className = `story-card ${completed ? 'story-completed' : unlocked ? 'story-available' : 'story-locked'}${isNext ? ' story-next' : ''}`;
       let stateHtml: string;
       let button = '';
       if (completed) {
         stateHtml = `<span class="state-badge state-completed">✅ CONCLUÍDA</span>
-          <div class="stars">${'⭐'.repeat(stars)}<span class="stars-dim">${'⭐'.repeat(3 - stars)}</span></div>`;
+          <div class="stars">${starsHtml(stars)}</div>`;
         button = `<button class="btn" data-story-play="${n}">Jogar novamente</button>`;
       } else if (unlocked) {
         stateHtml = `<span class="state-badge state-available">🔓 DISPONÍVEL</span>`;
@@ -449,8 +803,9 @@ export class Ui {
         stateHtml = `<span class="state-badge state-locked">🔒 BLOQUEADA</span>`;
       }
       card.innerHTML = `
-        <h3>Fase ${n}</h3>
-        <p>${meta ? `${meta.name} — ${meta.description}` : ''}</p>
+        <span class="story-num">FASE ${n}</span>
+        <h3>${meta ? meta.name : ''}</h3>
+        <p>${meta ? meta.description : ''}</p>
         ${stateHtml}
         ${button}
       `;
@@ -468,12 +823,14 @@ export class Ui {
 
   showStoryResult(level: LevelDef, stars: number, stats: LevelStats, unlockedText: string | null): void {
     this.storyWinTitleEl.textContent = `FASE ${level.number} CONCLUÍDA`;
-    this.storyWinStarsEl.innerHTML = `${'⭐'.repeat(stars)}<span class="stars-dim">${'⭐'.repeat(3 - stars)}</span>`;
-    const lines = level
+    this.storyWinSubtitleEl.textContent = performanceText(stars);
+    this.storyWinStarsEl.innerHTML = starsHtml(stars);
+    this.storyWinObjectiveEl.innerHTML = `<strong>✓</strong> ${level.objective}`;
+    const cells = level
       .summary(stats)
-      .map((l) => `<li>${l.label}: <strong>${l.value}</strong></li>`)
+      .map((l) => `<div class="cell"><span>${l.label}</span><b>${l.value}</b></div>`)
       .join('');
-    this.storyWinTextEl.innerHTML = `<li>Objetivo concluído ✓</li>${lines}`;
+    this.storyWinStatsEl.innerHTML = cells;
     if (unlockedText) {
       this.storyWinUnlockEl.textContent = unlockedText;
       this.storyWinUnlockEl.hidden = false;
@@ -483,14 +840,23 @@ export class Ui {
     this.show('storywin');
   }
 
-  showStoryLose(name: string): void {
-    this.storyLoseTextEl.textContent = `Missão falhou durante "${name}". Tente novamente.`;
+  showStoryLose(name: string, stats: LevelStats): void {
+    this.storyLoseTextEl.textContent = `A fase "${name}" foi perdida antes do objetivo ser concluído.`;
+    const cells: StatLine[] = [
+      { label: 'Tempo', value: formatTime(stats.time) },
+      { label: 'Tropas perdidas', value: `${stats.losses}` },
+    ];
+    if (stats.cartPct > 0) cells.push({ label: 'Carroça', value: `${Math.round(stats.cartPct)}%` });
+    if (stats.castlePct > 0) cells.push({ label: 'Castelo', value: `${Math.round(stats.castlePct)}%` });
+    this.storyLoseStatsEl.innerHTML = cells
+      .map((c) => `<div class="cell"><span>${c.label}</span><b>${c.value}</b></div>`)
+      .join('');
     this.show('storylose');
   }
 
   showStoryTeaser(level: LevelDef, stars: number, _stats: LevelStats): void {
     this.storyTeaserTitleEl.textContent = `FASE ${level.number} CONCLUÍDA`;
-    this.storyTeaserStarsEl.innerHTML = `${'⭐'.repeat(stars)}<span class="stars-dim">${'⭐'.repeat(3 - stars)}</span>`;
+    this.storyTeaserStarsEl.innerHTML = starsHtml(stars);
     this.storyTeaserNarrationEl.innerHTML = [
       'A batalha terminou.',
       'Mas encontramos algo no horizonte...',
@@ -505,7 +871,7 @@ export class Ui {
 
   showCampaignComplete(level: LevelDef, stars: number): void {
     this.campaignCompleteTitleEl.textContent = `FASE ${level.number} — SENHOR DA RUÍNA DERROTADO`;
-    this.campaignCompleteStarsEl.innerHTML = `${'⭐'.repeat(stars)}<span class="stars-dim">${'⭐'.repeat(3 - stars)}</span>`;
+    this.campaignCompleteStarsEl.innerHTML = starsHtml(stars);
     this.campaignCompleteNarrationEl.innerHTML = [
       'O reino está salvo...',
       'por enquanto.',
@@ -516,12 +882,38 @@ export class Ui {
     this.show('campaigncomplete');
   }
 
+  showAdventureResultWon(stats: AdventureStats): void {
+    this.el('advWinTitle').textContent = 'VITÓRIA!';
+    this.el('advWinSubtitle').textContent = 'FASE 1 CONCLUÍDA · Fases 2 e 3 reveladas no mapa do continente.';
+    this.el('advWinStats').innerHTML = this.adventureStatsHtml(stats);
+    this.show('advwin');
+  }
+
+  showAdventureResultLost(stats: AdventureStats): void {
+    this.el('advLoseTitle').textContent = 'DERROTA';
+    this.el('advLoseText').textContent = 'O seu castelo foi destruído. Volte ao mapa do continente e tente novamente.';
+    this.el('advLoseStats').innerHTML = this.adventureStatsHtml(stats);
+    this.show('advlose');
+  }
+
+  private adventureStatsHtml(stats: AdventureStats): string {
+    const total = TERRITORY_COLS * TERRITORY_ROWS;
+    return [
+      { label: 'Tempo', value: formatTime(stats.time) },
+      { label: 'Minas capturadas', value: `${stats.minesCaptured}/${stats.minesTotal}` },
+      { label: 'Territórios revelados', value: `${stats.territories}/${total}` },
+    ]
+      .map((l) => `<div class="cell"><span>${l.label}</span><b>${l.value}</b></div>`)
+      .join('');
+  }
+
   startGame(): void {
     this.hudEl.hidden = false;
     this.show(null);
   }
 
-  showPause(): void {
+  showPause(title = 'Pausa'): void {
+    this.el('pause-title').textContent = title;
     this.show('pause');
   }
 
@@ -558,27 +950,213 @@ export class Ui {
   }
 
   private show(screen: ScreenName | null): void {
-    for (const name of SCREENS) this.els[name].hidden = name !== screen;
+    if (this.transitionTimer !== null) {
+      window.clearTimeout(this.transitionTimer);
+      this.transitionTimer = null;
+      if (this.transitionOutgoing) {
+        this.transitionOutgoing.classList.remove('screen-exit');
+        this.transitionOutgoing.hidden = true;
+        this.transitionOutgoing = null;
+      }
+    }
+    const previous = this.current;
     this.current = screen;
+    const outgoing = previous !== null && previous !== screen ? this.els[previous] : null;
+    for (const name of SCREENS) {
+      const el = this.els[name];
+      el.hidden = name !== screen;
+      el.classList.remove('screen-enter', 'screen-exit');
+    }
+    if (outgoing) {
+      outgoing.hidden = false;
+      void outgoing.offsetWidth;
+      outgoing.classList.add('screen-exit');
+      this.transitionOutgoing = outgoing;
+      this.transitionTimer = window.setTimeout(() => {
+        outgoing.classList.remove('screen-exit');
+        outgoing.hidden = true;
+        this.transitionOutgoing = null;
+        this.transitionTimer = null;
+      }, Math.max(1, Math.round(CONFIG.ui.screenTransition * 1000)));
+    }
+    const incoming = screen !== null ? this.els[screen] : null;
+    if (incoming) {
+      void incoming.offsetWidth;
+      incoming.classList.add('screen-enter');
+    }
   }
 
-  private renderUpgrades(options: UpgradeDef[]): void {
-    const key = options.map((o) => o.id).join(',');
-    if (key === this.lastUpgradeKey) return;
-    this.lastUpgradeKey = key;
-    this.upgradesEl.textContent = '';
-    for (const o of options) {
+  setProgressionVisible(visible: boolean): void {
+    this.progressionVisibleState = visible;
+    this.progressionEl.hidden = !visible;
+  }
+
+  progressionVisible(): boolean {
+    return this.progressionVisibleState;
+  }
+
+  setPlacing(kind: BuildingKind | null): void {
+    this.placing = kind;
+    this.buildHintEl.hidden = kind === null;
+  }
+
+  updateProgression(snap: ProgressionSnapshot): void {
+    const t = snap.troops;
+    const key = [
+      Math.floor(snap.gold),
+      snap.castleLevel,
+      snap.castleCost,
+      snap.castleAffordable ? 1 : 0,
+      snap.castleHpBonus,
+      snap.castleTowerMult,
+      snap.buildingCount,
+      snap.buildingCap,
+      snap.buildingCapReached ? 1 : 0,
+      snap.diamonds,
+      snap.troopCap,
+      t.knight.level,
+      t.knight.affordable ? 1 : 0,
+      t.archer.level,
+      t.archer.affordable ? 1 : 0,
+      t.tank.level,
+      t.tank.affordable ? 1 : 0,
+      t.champion.level,
+      t.champion.affordable ? 1 : 0,
+      this.placing ?? 'none',
+      this.progressionVisibleState ? 1 : 0,
+    ].join(':');
+    if (key === this.lastProgressionKey) return;
+    this.lastProgressionKey = key;
+
+    this.progressHudEl.textContent = `🏰${snap.castleLevel} 💎${snap.diamonds}`;
+    this.progDiamondsEl.textContent = snap.diamonds.toString();
+    this.renderPips(this.progCastlePipsEl, snap.castleLevel, snap.castleMaxLevel);
+    this.progCastleInfoEl.textContent = `Nível ${snap.castleLevel}/${snap.castleMaxLevel} · HP +${snap.castleHpBonus} · Torres ×${snap.castleTowerMult.toFixed(2)} · Cap ${snap.buildingCap}`;
+    if (snap.castleMaxed) {
+      this.progCastleBtnEl.disabled = true;
+      this.progCastleBtnEl.textContent = 'MÁXIMO';
+    } else if (!snap.castleAffordable) {
+      this.progCastleBtnEl.disabled = true;
+      this.progCastleBtnEl.textContent = 'OURO INSUFICIENTE';
+    } else {
+      this.progCastleBtnEl.disabled = false;
+      this.progCastleBtnEl.textContent = `MELHORAR · 🪙${snap.castleCost}`;
+    }
+
+    this.progBuildCountEl.textContent = `${snap.buildingCount}/${snap.buildingCap}`;
+    if (snap.buildingCapReached) {
+      this.progBuildInfoEl.textContent = 'LIMITE DE CONSTRUÇÕES ATINGIDO';
+      this.progBuildInfoEl.classList.add('warn');
+    } else {
+      this.progBuildInfoEl.textContent = `${snap.buildingCount}/${snap.buildingCap} construções usadas`;
+      this.progBuildInfoEl.classList.remove('warn');
+    }
+    this.updateBuildButton(this.buildHouseEl, 'house', snap, '🏠 Casa');
+    this.updateBuildButton(this.buildMarketEl, 'market', snap, '🏪 Mercado');
+    this.updateBuildButton(this.buildTowerEl, 'tower', snap, '🗼 Torre');
+
+    for (const type of ARMY_TYPES) {
+      const info = t[type];
+      const btn = this.el<HTMLButtonElement>(`prog-troop-${type}`);
+      btn.disabled = info.level >= info.maxLevel || !info.affordable;
+      if (info.level >= info.maxLevel) {
+        btn.textContent = 'MÁX';
+      } else if (!info.affordable) {
+        btn.textContent = info.currency === 'diamond' ? 'DIAMANTE INSUFICIENTE' : 'OURO INSUFICIENTE';
+      } else {
+        btn.textContent = `${info.currency === 'diamond' ? '💎' : '🪙'}${info.cost}`;
+      }
+      this.renderPips(this.el(`prog-troop-pips-${type}`), info.level, info.maxLevel);
+    }
+  }
+
+  private updateBuildButton(btn: HTMLButtonElement, kind: BuildingKind, snap: ProgressionSnapshot, label: string): void {
+    if (this.placing === kind) {
+      btn.disabled = false;
+      btn.classList.add('active');
+      btn.innerHTML = `${label}<br><small>✕ CANCELAR</small>`;
+      return;
+    }
+    btn.classList.remove('active');
+    const cost = snap.buildCosts[kind];
+    const atCap = snap.buildingCapReached;
+    const affordable = snap.gold >= cost && !atCap;
+    btn.disabled = !affordable;
+    const note = atCap ? 'LIMITE' : `🪙${cost}`;
+    btn.innerHTML = `${label}<br><small>${note}</small>`;
+  }
+
+  private renderPips(el: HTMLElement, level: number, max: number): void {
+    el.textContent = '';
+    for (let i = 0; i < max; i++) {
+      const dot = document.createElement('span');
+      dot.className = `pip${i < level ? ' on' : ''}`;
+      el.appendChild(dot);
+    }
+  }
+
+  private initProgressionPanel(): void {
+    this.buildHouseEl.innerHTML = '🏠 Casa<br><small>🪙60</small>';
+    this.buildMarketEl.innerHTML = '🏪 Mercado<br><small>🪙120</small>';
+    this.buildTowerEl.innerHTML = '🗼 Torre<br><small>🪙500</small>';
+    for (const type of ARMY_TYPES) {
+      const row = document.createElement('div');
+      row.className = 'prog-troop-row';
+      const name = document.createElement('span');
+      name.className = 'prog-troop-name';
+      name.textContent = `${CONFIG.recruits[type].icon} ${ARMY_NAMES[type]}`;
+      const pips = document.createElement('div');
+      pips.className = 'prog-pips troop';
+      pips.id = `prog-troop-pips-${type}`;
       const btn = document.createElement('button');
-      btn.className = 'upgrade-btn';
-      btn.innerHTML = `<strong>${o.icon} ${o.name}</strong><small>${o.description}</small>`;
-      btn.addEventListener('click', () => this.handlers.onUpgrade(o.id));
-      this.upgradesEl.appendChild(btn);
+      btn.className = 'prog-btn small';
+      btn.id = `prog-troop-${type}`;
+      btn.dataset.troopUp = type;
+      row.append(name, pips, btn);
+      this.progTroopsEl.appendChild(row);
     }
   }
 
   private initScreens(): void {
     this.el('btn-play').addEventListener('click', () => this.handlers.onOpenModes());
     this.el('btn-mode-infinite').addEventListener('click', () => this.handlers.onPlayInfinite());
+    this.el('btn-difficulty-back').addEventListener('click', () => this.handlers.onDifficultyBack());
+    this.el('difficulty-grid').addEventListener('click', (e) => {
+      const card = (e.target as HTMLElement).closest<HTMLElement>('[data-difficulty]');
+      if (!card) return;
+      const d = card.dataset.difficulty;
+      if (d === 'hardcore') {
+        this.triggerHardcoreLock(card);
+        return;
+      }
+      if (d === 'easy' || d === 'medium' || d === 'hard') this.handlers.onDifficultySelect(d);
+    });
+    this.el('btn-mode-adventure').addEventListener('click', () => this.handlers.onPlayAdventure());
+    this.el('menu-creative-card').addEventListener('click', () => this.handlers.onPlayCreative());
+    this.el('menu-coop-card').addEventListener('click', () => this.triggerCoopLock(this.el('menu-coop-card')));
+    this.el('btn-creative-back').addEventListener('click', () => this.handlers.onCreativeBack());
+    this.el('btn-creative-start-editor').addEventListener('click', () => this.handlers.onCreativeStart());
+    this.el('btn-creative-editor-back').addEventListener('click', () => this.handlers.onCreativeEditorBack());
+    this.el('creative-team-blue').addEventListener('click', () => this.handlers.onCreativeTeam('blue'));
+    this.el('creative-team-red').addEventListener('click', () => this.handlers.onCreativeTeam('red'));
+    this.el('creative-palette').addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-creative-kind]');
+      if (!btn) return;
+      this.handlers.onCreativePick({
+        kind: btn.dataset.creativeKind as CreativePick['kind'],
+        type: btn.dataset.creativeType as CreativePick['type'],
+      });
+    });
+    this.el('btn-creative-remove').addEventListener('click', () => this.handlers.onCreativeRemove());
+    this.el('btn-creative-start').addEventListener('click', () => this.handlers.onCreativeStartBattle());
+    this.el('btn-creative-retry').addEventListener('click', () => this.handlers.onCreativeRetry());
+    this.el('btn-creative-edit').addEventListener('click', () => this.handlers.onCreativeEdit());
+    this.el('btn-creative-result-menu').addEventListener('click', () => this.handlers.onCreativeResultMenu());
+    this.el('btn-creative-pause').addEventListener('click', () => this.handlers.onCreativePause());
+    this.el('creative-spectator').addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.spec-speed-btn');
+      if (btn) this.handlers.onCreativeSpeed(Number(btn.dataset.speed) as 1 | 2 | 4);
+    });
     this.el('btn-mode-story').addEventListener('click', () => this.handlers.onOpenStory());
     this.el('btn-modes-back').addEventListener('click', () => this.handlers.onBackToMenu());
     this.el('storyGrid').addEventListener('click', (e) => {
@@ -597,6 +1175,12 @@ export class Ui {
     this.el('btn-campaign-menu').addEventListener('click', () => this.handlers.onCampaignCompleteMenu());
     this.el('btn-story-lose-retry').addEventListener('click', () => this.handlers.onStoryLoseRetry());
     this.el('btn-story-lose-menu').addEventListener('click', () => this.handlers.onStoryLoseMenu());
+    this.el('btn-adv-win-restart').addEventListener('click', () => this.handlers.onAdventureWinRestart());
+    this.el('btn-adv-win-continue').addEventListener('click', () => this.handlers.onAdventureWinContinue());
+    this.el('btn-adv-win-menu').addEventListener('click', () => this.handlers.onAdventureWinMenu());
+    this.el('btn-adv-lose-retry').addEventListener('click', () => this.handlers.onAdventureLoseRetry());
+    this.el('btn-adv-lose-continent').addEventListener('click', () => this.handlers.onAdventureLoseContinent());
+    this.el('btn-adv-lose-menu').addEventListener('click', () => this.handlers.onAdventureLoseMenu());
     this.el('tutorialClose').addEventListener('click', () => this.hideTutorial());
     this.el('btn-controls').addEventListener('click', () => this.openControls());
     this.el('btn-settings').addEventListener('click', () => this.openSettings());
@@ -609,6 +1193,16 @@ export class Ui {
     this.el('btn-retry').addEventListener('click', () => this.handlers.onRestart());
     this.el('btn-gameover-menu').addEventListener('click', () => this.handlers.onQuitToMenu());
     this.el('btn-start-wave').addEventListener('click', () => this.handlers.onStartWave());
+    this.el('btn-progress').addEventListener('click', () => this.handlers.onToggleProgress());
+    this.el('prog-close').addEventListener('click', () => this.handlers.onToggleProgress());
+    this.el('prog-castle-btn').addEventListener('click', () => this.handlers.onUpgradeCastle());
+    this.el('prog-troops').addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-troop-up]');
+      if (btn) this.handlers.onUpgradeTroop(btn.dataset.troopUp as PlayerTroopType);
+    });
+    this.el('prog-build-house').addEventListener('click', () => this.handlers.onBuild('house'));
+    this.el('prog-build-market').addEventListener('click', () => this.handlers.onBuild('market'));
+    this.el('prog-build-tower').addEventListener('click', () => this.handlers.onBuild('tower'));
   }
 
   private initSettings(): void {

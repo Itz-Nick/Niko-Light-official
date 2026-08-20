@@ -1,4 +1,5 @@
 import { CONFIG } from '../config';
+import type { Difficulty } from '../config';
 import { SpatialGrid } from './grid';
 import { AudioManager } from '../audio/audio-manager';
 import type { SfxKind } from '../audio/audio-manager';
@@ -21,21 +22,63 @@ import { updateAutoFormation, resetAutoFormation, commandSquad } from '../format
 import { Input } from '../input/input';
 import type { InputEvent } from '../input/input';
 import { Renderer } from '../render/renderer';
-import type { RenderOverlay, WorldMarker } from '../render/renderer';
+import type { BuildPreview, MenuVariant, RenderOverlay, WorldMarker } from '../render/renderer';
 import { SettingsStore } from '../settings/settings';
 import { CampaignStore } from '../story/campaign';
 import { levelByNumber } from '../story/levels';
 import { starsFor } from '../story/story';
 import type { LevelContext, LevelDef, LevelStats } from '../story/story';
-import type { EconomyModifiers, HitInfo, PlayerTroopType, TroopModifiers, TroopType } from '../types';
+import type { HitInfo, PlayerTroopType, TroopType } from '../types';
 import { Ui } from '../ui/ui';
-import type { UpgradeDef, UpgradeId } from '../upgrades/upgrades';
+import { Progression } from '../progression/progression';
+import type { BuildingKind } from '../progression/progression';
+import { BUILDING_NAMES, buildingCost, canPlaceBuilding, createBuilding } from '../progression/buildings';
 import { WaveManager } from '../waves/wave-manager';
 import type { WavePhase } from '../waves/wave-manager';
+import { AdventureLevel } from '../adventure/adventure';
+import { AdventureStore } from '../adventure/adventure-store';
+import {
+  buildContinentRegions,
+  continentDiscovered,
+  continentTransform,
+  regionScreenRect,
+  CONTINENT_BACK_BUTTON,
+  type ContinentRegion,
+  type ContinentView,
+} from '../adventure/continent';
+import type { AdventureStats } from '../ui/ui';
+import {
+  addCreativeEntity,
+  createCreativeScenario,
+  createCreativeStructure,
+  createCreativeUnit,
+  creativeEntityRadius,
+  creativePickDims,
+  creativePickRadius,
+  creativeTeamOf,
+  moveCreativeEntity,
+  removeCreativeEntity,
+  type CreativeEntity,
+  type CreativePhase,
+  type CreativePick,
+  type CreativeScenario,
+  type CreativeTeam,
+} from '../creative/creative';
+import { CreativeAI, updateCreativeCaptures } from '../creative/creative-ai';
+import type { CreativeEditorView, CreativeGhost, CreativeSelected } from '../render/renderer';
 
-type Screen = 'menu' | 'modes' | 'playing' | 'paused' | 'storyselect' | 'phaseintro';
+type Screen = 'menu' | 'modes' | 'difficulty' | 'creative' | 'creative-editor' | 'playing' | 'paused' | 'storyselect' | 'phaseintro' | 'continent';
 
 const BIOME_TRANSITION_TIME = 1.6;
+
+const BIOME_ICONS: Record<BiomeId, string> = {
+  field: '🌾',
+  desert: '🏜️',
+  snow: '❄️',
+  volcanic: '🌋',
+  ruins: '🏚️',
+  cosmic: '🌌',
+};
 
 const TROOP_LABELS: Record<TroopType, string> = {
   knight: 'Cavaleiros',
@@ -74,10 +117,16 @@ export class Game {
   private units: Unit[] = [];
   private structures: Structure[] = [];
   private base: Structure | null = null;
-  private mode: 'infinite' | 'story' | null = null;
+  private mode: 'infinite' | 'story' | 'adventures' | null = null;
   private readonly campaign = new CampaignStore();
+  private readonly adventureStore = new AdventureStore();
+  private continentRegions: ContinentRegion[] = [];
   private level: LevelDef | null = null;
   private levelNumber = 0;
+  private adventure: AdventureLevel | null = null;
+  private adventureElapsed = 0;
+  private adventureOver = false;
+  private adventureResultShown = false;
   private storyElapsed = 0;
   private storyStartPlayerCount = 0;
   private storyMineTotal = 0;
@@ -89,14 +138,14 @@ export class Game {
   private bossAnnounced = false;
   private selected = new Set<Unit>();
   private recruitIndex = 0;
-  private troopMods: TroopModifiers = { damage: 1, health: 1, speed: 1, attackSpeed: 1, range: 1, defense: 0 };
-  private econMods: EconomyModifiers = { mineIncome: 1, waveBonus: 0 };
-  private recentUpgrades: UpgradeId[] = [];
   private playerUnitCount = 0;
-  private upgradeOptions: UpgradeDef[] = [];
+  private readonly progression = new Progression();
+  private placingBuild: BuildingKind | null = null;
+  private buildPreview: BuildPreview | null = null;
   private lastPhase: WavePhase = 'preparation';
   private markers: WorldMarker[] = [];
   private screen: Screen = 'menu';
+  private difficulty: Difficulty = 'medium';
   private renderedBiome: BiomeId = 'field';
   private biomeTransition = -1;
   private goldDelta = 0;
@@ -112,6 +161,31 @@ export class Game {
   private lastAliveTowers = -1;
   private lastMines = -1;
   private lastBaseHp = -1;
+  private lastEnemyBaseHp = -1;
+  private creativeScenario: CreativeScenario | null = null;
+  private creativeUnits: Unit[] = [];
+  private creativeStructures: Structure[] = [];
+  private creativeTeam: CreativeTeam = 'blue';
+  private creativePlacing: CreativePick | null = null;
+  private creativePhase: CreativePhase = 'prep';
+  private creativeCountdown = 0;
+  private lastCreativeCount = -1;
+  private creativeSelectedId: number | null = null;
+  private creativeRotation = 0;
+  private creativeAi = new CreativeAI();
+  private creativeBlueEconomy = new Economy();
+  private creativeRedEconomy = new Economy();
+  private creativeKills: Record<CreativeTeam, number> = { blue: 0, red: 0 };
+  private creativeElapsed = 0;
+  private creativePaused = false;
+  private creativeResultShown = false;
+  private creativeBlueHadBase = false;
+  private creativeRedHadBase = false;
+  private creativeRecruitTimers: Record<CreativeTeam, number> = { blue: 0, red: 0 };
+  private creativeBlueAlivePrev = 0;
+  private creativeRedAlivePrev = 0;
+  private creativeSpeed: 1 | 2 | 4 = 1;
+  private creativeBattleFlash = 0;
 
   constructor() {
     this.canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -124,7 +198,46 @@ export class Game {
         this.audio.playSfx('ui-confirm');
         this.syncMusic();
       },
-      onPlayInfinite: () => this.startMatch(),
+      onPlayInfinite: () => {
+        this.screen = 'difficulty';
+        this.ui.showDifficulty();
+        this.audio.playSfx('ui-confirm');
+        this.syncMusic();
+      },
+      onDifficultySelect: (difficulty) => this.startMatch(difficulty),
+      onDifficultyBack: () => {
+        this.screen = 'modes';
+        this.ui.showModes();
+        this.audio.playSfx('ui-click');
+        this.syncMusic();
+      },
+      onPlayAdventure: () => this.showContinent(),
+      onPlayCreative: () => this.showCreative(),
+      onCreativeBack: () => {
+        this.screen = 'modes';
+        this.ui.showModes();
+        this.syncMusic();
+      },
+      onCreativeStart: () => this.startCreativeEditor(),
+      onCreativeEditorBack: () => this.exitCreativeEditor(),
+      onCreativeTeam: (team) => this.setCreativeTeam(team),
+      onCreativePick: (pick) => this.handleCreativePick(pick),
+      onCreativeRemove: () => this.handleCreativeRemove(),
+      onCreativeStartBattle: () => this.startCreativeBattle(),
+      onCreativeRetry: () => this.retryCreativeBattle(),
+      onCreativeEdit: () => this.editCreativeScenario(),
+      onCreativeResultMenu: () => this.quitToMenu(),
+      onCreativeSpeed: (speed) => this.setCreativeSpeed(speed),
+      onCreativePause: () => {
+        if (this.creativePaused) {
+          this.creativePaused = false;
+          this.ui.showCreativeEditor();
+        } else {
+          this.creativePaused = true;
+          this.ui.showPause('CRIATIVO — PAUSADO');
+        }
+      },
+      onCoopLocked: () => this.audio.playSfx('ui-denied'),
       onBackToMenu: () => {
         this.screen = 'menu';
         this.ui.showMenu();
@@ -150,10 +263,22 @@ export class Game {
       onCampaignCompleteMenu: () => this.quitToMenu(),
       onStoryLoseRetry: () => this.startStoryLevel(this.levelNumber),
       onStoryLoseMenu: () => this.quitToMenu(),
+      onAdventureWinRestart: () => this.startAdventure(),
+      onAdventureWinContinue: () => this.showContinent(),
+      onAdventureWinMenu: () => this.quitToMenu(),
+      onAdventureLoseRetry: () => this.startAdventure(),
+      onAdventureLoseContinent: () => this.showContinent(),
+      onAdventureLoseMenu: () => this.quitToMenu(),
       onResume: () => this.resume(),
       onQuitToMenu: () => this.quitToMenu(),
       onRestart: () => this.startMatch(),
-      onUpgrade: (id) => this.applyUpgrade(id),
+      onToggleProgress: () => {
+        this.ui.setProgressionVisible(!this.ui.progressionVisible());
+        this.audio.playSfx('ui-click');
+      },
+      onUpgradeCastle: () => this.tryUpgradeCastle(),
+      onUpgradeTroop: (type) => this.tryUpgradeTroop(type),
+      onBuild: (kind) => this.toggleBuildMode(kind),
       onStartWave: () => this.waves.beginBattle(),
       onRecruit: (type) => this.handleRecruit(type),
       onSettingsChange: () => this.audio.applySettings(),
@@ -186,7 +311,7 @@ export class Game {
   private wireUiSounds(): void {
     let lastHoverBtn: HTMLElement | null = null;
     document.addEventListener('mouseover', (e) => {
-      const btn = (e.target as HTMLElement).closest<HTMLElement>('.screen .btn');
+      const btn = (e.target as HTMLElement).closest<HTMLElement>('.screen .btn, .screen .side-card');
       if (!btn) {
         lastHoverBtn = null;
         return;
@@ -197,7 +322,7 @@ export class Game {
     });
     document.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
-      const btn = target.closest<HTMLButtonElement>('.btn, .army-btn, .upgrade-btn');
+      const btn = target.closest<HTMLButtonElement>('.btn, .army-btn, .prog-btn, .prog-open');
       if (btn && !btn.disabled) this.audio.playSfx('ui-click');
     });
   }
@@ -235,31 +360,73 @@ export class Game {
 
     for (const e of this.input.drainEvents()) {
       if (e.type === 'pause') {
+        if (this.placingBuild) {
+          this.cancelBuildMode();
+          continue;
+        }
+        if (this.screen === 'creative-editor' && this.creativePlacing) {
+          this.setCreativePlacing(null);
+          continue;
+        }
         this.handlePauseKey();
         continue;
       }
-      if (this.screen === 'playing' && !this.gameOver && !this.storyOver) this.handleEvent(e);
+      if (this.screen === 'continent') {
+        if (e.type === 'select') this.handleContinentClick(e.x, e.y);
+        continue;
+      }
+      if (this.screen === 'creative-editor') {
+        this.handleCreativeEvent(e);
+        continue;
+      }
+      if (this.screen === 'playing' && !this.gameOver && !this.storyOver && !this.adventureOver) this.handleEvent(e);
     }
 
     this.update(dt);
     this.updateMarkers(dt);
 
     const cart = this.mode === 'story' ? this.getCart() : null;
-    this.renderer.render(
-      this.camera,
-      this.units,
-      this.structures,
-      this.selected,
-      this.input.dragRect,
-      this.markers,
-      this.renderedBiome,
-      this.biomeOverlay(),
-      this.projectiles,
-      this.mode === 'story' ? this.storyRoute : null,
-      cart,
-    );
+    const menuVariant = this.menuBackdropVariant();
+    if (this.screen === 'continent') {
+      this.renderer.renderContinent(dt, this.continentView());
+    } else if (this.screen === 'creative-editor') {
+      this.renderer.renderCreativeEditor(this.camera, this.creativeUnits, this.creativeStructures, this.creativeView(), this.projectiles, this.markers);
+    } else if (menuVariant) {
+      this.renderer.renderMenu(dt, menuVariant);
+    } else {
+      this.renderer.render(
+        this.camera,
+        this.units,
+        this.structures,
+        this.selected,
+        this.input.dragRect,
+        this.markers,
+        this.renderedBiome,
+        this.biomeOverlay(),
+        this.projectiles,
+        this.mode === 'story' ? this.storyRoute : null,
+        cart,
+        this.mode === 'adventures' && this.adventure ? this.adventure.renderData() : null,
+        this.buildPreview,
+      );
+    }
 
-    if (this.mode === 'story') {
+    if (this.mode === 'adventures' && this.adventure) {
+      const pb = this.adventure.structures[0];
+      const eb = this.adventure.structures[1];
+      this.ui.updateAdventureHud(
+        this.economy,
+        this.playerUnitCount,
+        pb ? pb.hp : 0,
+        pb ? pb.maxHp : 1,
+        eb ? eb.hp : 0,
+        eb ? eb.maxHp : 1,
+        this.fps,
+        this.progression.troopCap(this.structures),
+      );
+      this.ui.updateProgression(this.progression.snapshot(this.economy.gold, this.structures));
+      if (this.goldDelta > CONFIG.ui.goldGainThreshold) this.ui.showGoldGain(this.goldDelta);
+    } else if (this.mode === 'story') {
       const base = this.getWeakestBase();
       this.ui.updateStoryHud(
         cart ? cart.hp : 0,
@@ -270,9 +437,10 @@ export class Game {
         this.fps,
       );
     } else if (this.base) {
-      this.ui.updateHud(this.economy, this.waves, this.playerUnitCount, this.base.hp, this.base.maxHp, this.fps, this.troopCounts);
+      this.ui.updateHud(this.economy, this.waves, this.playerUnitCount, this.base.hp, this.base.maxHp, this.fps, this.troopCounts, this.progression.troopCap(this.structures));
+      this.ui.updateProgression(this.progression.snapshot(this.economy.gold, this.structures));
       if (this.waves.phase === 'preparation') {
-        this.ui.showPreparation(this.waves.wave, this.upgradeOptions, this.waves.timer);
+        this.ui.showPreparation(this.waves.wave, this.waves.timer);
       } else {
         this.ui.hidePreparation();
       }
@@ -303,12 +471,11 @@ export class Game {
     this.markers.length = 0;
     this.selected.clear();
     this.economy.gold = CONFIG.economy.startingGold;
-    this.troopMods = { damage: 1, health: 1, speed: 1, attackSpeed: 1, range: 1, defense: 0 };
-    this.econMods = { mineIncome: 1, waveBonus: 0 };
-    this.recentUpgrades = [];
     this.playerUnitCount = 0;
-    this.upgradeOptions = [];
     this.lastPhase = 'preparation';
+    this.progression.reset();
+    this.placingBuild = null;
+    this.buildPreview = null;
     this.renderedBiome = getBiomeForWave(1);
     this.biomeTransition = -1;
     this.lastPrepSec = -1;
@@ -316,20 +483,42 @@ export class Game {
     this.lastAliveTowers = -1;
     this.lastMines = -1;
     this.lastBaseHp = -1;
+    this.lastEnemyBaseHp = -1;
     this.waves.reset();
+    this.waves.setDifficulty(this.difficulty);
     resetAutoFormation();
     this.ui.setMode('infinite');
+    this.adventure = null;
+    this.adventureElapsed = 0;
+    this.adventureOver = false;
+    this.adventureResultShown = false;
     const cx = CONFIG.positions.base.x;
     const cy = CONFIG.positions.base.y;
-    const starting: TroopType[] = [];
+    this.camera.setWorldSize(CONFIG.world.width, CONFIG.world.height);
+    this.camera.x = cx;
+    this.camera.y = cy;
+    const starting: PlayerTroopType[] = [];
     const startingConfig = CONFIG.player.startingTroops;
-    for (const [type, count] of Object.entries(startingConfig) as [TroopType, number][]) {
+    for (const [type, count] of Object.entries(startingConfig) as [PlayerTroopType, number][]) {
       for (let i = 0; i < count; i++) starting.push(type);
     }
+    if (this.difficulty === 'easy') starting.push('champion');
     starting.forEach((type, i) => {
       const a = (i / starting.length) * Math.PI * 2;
-      this.units.push(createUnit('player', type, cx + Math.cos(a) * 90, cy + Math.sin(a) * 90, this.troopMods));
+      this.units.push(createUnit('player', type, cx + Math.cos(a) * 90, cy + Math.sin(a) * 90, this.progression.modsFor(type)));
     });
+    this.applyDifficultyBuildings(cx, cy);
+  }
+
+  private applyDifficultyBuildings(cx: number, cy: number): void {
+    const towerMult = this.progression.castleTowerMult();
+    if (this.difficulty !== 'hard') {
+      this.structures.push(createBuilding('house', cx + 60, cy - 130, towerMult));
+      this.structures.push(createBuilding('house', cx, cy + 160, towerMult));
+    }
+    if (this.difficulty === 'easy') {
+      this.structures.push(createBuilding('market', cx - 60, cy + 60, towerMult));
+    }
   }
 
   private resetStory(): void {
@@ -358,9 +547,18 @@ export class Game {
     resetAutoFormation();
     this.ui.setMode('story');
     this.ui.hideBossHud();
+    this.adventure = null;
+    this.adventureElapsed = 0;
+    this.adventureOver = false;
+    this.adventureResultShown = false;
+    this.camera.setWorldSize(CONFIG.world.width, CONFIG.world.height);
   }
 
   private update(dt: number): void {
+    if (this.screen === 'creative-editor') {
+      this.updateCreative(dt);
+      return;
+    }
     if (this.screen !== 'playing') {
       this.goldDelta = 0;
       this.audio.stopAmbient();
@@ -369,6 +567,10 @@ export class Game {
     if (this.mode === 'story') {
       if (!this.storyOver) this.updateStory(dt);
       this.goldDelta = 0;
+      return;
+    }
+    if (this.mode === 'adventures') {
+      if (!this.adventureOver) this.updateAdventure(dt);
       return;
     }
     if (this.gameOver) {
@@ -419,7 +621,6 @@ export class Game {
     for (const s of this.structures) if (s.flashTimer > 0) s.flashTimer -= dt;
 
     if (this.lastPhase === 'preparation' && this.waves.phase === 'battle') {
-      this.upgradeOptions = [];
       this.ui.showToast(`WAVE ${this.waves.wave} EM BATALHA!`, 'alert');
       this.playSfx('wave', 'wave-start', 0.5);
       this.audio.setMusicLevel(this.settings.value.musicVolume);
@@ -470,6 +671,7 @@ export class Game {
     this.lastAliveTowers = towers;
     this.lastMines = mines;
     this.lastBaseHp = this.base ? this.base.hp : 0;
+    this.updateBuildPreview();
   }
 
   private updateStory(dt: number): void {
@@ -567,6 +769,91 @@ export class Game {
     };
   }
 
+  private updateAdventure(dt: number): void {
+    const adv = this.adventure;
+    if (!adv) return;
+    const goldBefore = this.economy.gold;
+    this.input.updateCamera(this.camera, dt);
+    this.adventureElapsed += dt;
+
+    this.grid.clear();
+    this.playerUnitCount = 0;
+    for (const u of this.units) {
+      if (!u.alive) continue;
+      this.grid.insert(u);
+      if (u.team === 'player') this.playerUnitCount++;
+    }
+
+    const { spawned, hits } = updateCombat(this.units, this.structures, this.grid, this.economy, dt);
+    this.projectiles.push(...spawned);
+    const towerShots = updateTowers(this.structures, this.grid, this.projectiles, dt);
+    const projHits = updateProjectiles(this.projectiles, dt);
+    this.projectiles = this.projectiles.filter((p) => p.alive);
+    const allHits = hits.length > 0 || projHits.length > 0 ? [...hits, ...projHits] : hits;
+    if (allHits.length > 0) this.applyHits(allHits);
+    this.playCombatSounds(allHits, spawned);
+    if (towerShots > 0) this.playSfx('tower', 'tower-shot', 0.06);
+    updateAutoFormation(this.units, this.grid, this.structures, dt);
+    updateUnits(this.units, this.grid, this.structures, dt, CONFIG.adventure.worldW, CONFIG.adventure.worldH);
+    adv.update(dt);
+    this.updateStructures(dt);
+
+    let deaths = 0;
+    for (const u of this.units) {
+      if (!u.alive) {
+        this.pushMarker(u.x, u.y, 'death');
+        deaths++;
+      }
+    }
+    if (deaths > 0) this.playSfx('death', 'unit-death', 0.12);
+    this.units = this.units.filter((u) => u.alive);
+    this.pruneSelection();
+
+    const pBase = this.structures[0];
+    const eBase = this.structures[1];
+    if (this.lastBaseHp >= 0 && pBase && pBase.hp < this.lastBaseHp) this.playSfx('castle', 'castle-hit', 0.3);
+    if (this.lastEnemyBaseHp >= 0 && eBase && eBase.hp < this.lastEnemyBaseHp) this.playSfx('castle', 'castle-hit', 0.3);
+    this.lastBaseHp = pBase ? pBase.hp : 0;
+    this.lastEnemyBaseHp = eBase ? eBase.hp : 0;
+
+    if (eBase && eBase.hp <= 0) this.handleAdventureVictory();
+    else if (pBase && pBase.hp <= 0) this.handleAdventureDefeat();
+    this.goldDelta = this.economy.gold - goldBefore;
+    this.updateBuildPreview();
+  }
+
+  private adventureStats(): AdventureStats {
+    let territories = 0;
+    let minesCaptured = 0;
+    let minesTotal = 0;
+    if (this.adventure) {
+      for (const t of this.adventure.territories) if (t.state === 'revealed') territories++;
+      minesCaptured = this.adventure.minesCaptured;
+      minesTotal = this.adventure.minesTotal;
+    }
+    return { time: this.adventureElapsed, territories, minesCaptured, minesTotal };
+  }
+
+  private handleAdventureVictory(): void {
+    if (this.adventureOver) return;
+    this.adventureOver = true;
+    this.adventureResultShown = true;
+    this.ui.hideTutorial();
+    const stats = this.adventureStats();
+    this.adventureStore.recordPhase1({ time: stats.time, minesCaptured: stats.minesCaptured, regionsRevealed: stats.territories });
+    this.ui.showAdventureResultWon(stats);
+    this.audio.playSfx('wave-complete');
+  }
+
+  private handleAdventureDefeat(): void {
+    if (this.adventureOver) return;
+    this.adventureOver = true;
+    this.adventureResultShown = true;
+    this.ui.hideTutorial();
+    this.ui.showAdventureResultLost(this.adventureStats());
+    this.audio.playSfx('ui-denied');
+  }
+
   private updateBossHud(): void {
     let boss: Unit | null = null;
     for (const u of this.units) {
@@ -609,7 +896,8 @@ export class Game {
         this.ui.showStoryResult(this.level, stars, stats, unlockedText);
       }
     } else {
-      this.ui.showStoryLose(this.level?.name ?? '');
+      const stats = this.computeLevelStats();
+      this.ui.showStoryLose(this.level?.name ?? '', stats);
       this.audio.playSfx('ui-denied');
     }
   }
@@ -687,12 +975,35 @@ export class Game {
   }
 
   private updateStructures(dt: number): void {
-    if (this.waves.phase === 'preparation') return;
-    let passive = CONFIG.economy.passiveGoldPerSecond;
+    if (this.mode !== 'adventures' && this.waves.phase === 'preparation') return;
+    const basePassive = this.mode === 'adventures' ? CONFIG.adventure.passiveGoldPerSecond : CONFIG.economy.passiveGoldPerSecond;
+    let passive = basePassive;
     for (const s of this.structures) {
-      if (s.alive && s.kind === 'mine') passive += CONFIG.mine.goldPerSecond * this.econMods.mineIncome;
+      if (!s.alive) continue;
+      if (s.kind === 'mine' && (s.owner === undefined || s.owner === 'player')) {
+        passive += CONFIG.mine.goldPerSecond;
+      } else if (s.kind === 'market') {
+        passive += CONFIG.progression.buildings.market.goldPerSecond;
+      }
     }
     this.economy.update(dt, passive);
+  }
+
+  private menuBackdropVariant(): MenuVariant | null {
+    switch (this.screen) {
+      case 'menu':
+        return 'menu';
+      case 'modes':
+        return 'modes';
+      case 'difficulty':
+        return 'modes';
+      case 'creative':
+        return 'creative';
+      case 'storyselect':
+        return 'story';
+      default:
+        return null;
+    }
   }
 
   private updateBiomeTransition(dt: number): void {
@@ -717,12 +1028,19 @@ export class Game {
       alpha: Math.max(0, Math.min(1, alpha)) * 0.85,
       title: BIOMES[this.renderedBiome].name.toUpperCase(),
       subtitle: this.waves.phase === 'battle' ? `WAVE ${this.waves.wave}` : `WAVE ${this.waves.wave + 1}`,
+      progress: t,
+      tint: BIOMES[this.renderedBiome].background,
+      icon: BIOME_ICONS[this.renderedBiome],
     };
   }
 
   private handleEvent(e: InputEvent): void {
     switch (e.type) {
       case 'select': {
+        if (this.placingBuild) {
+          this.placeBuilding(e.x, e.y);
+          break;
+        }
         const world = this.camera.screenToWorld(e.x, e.y);
         const unit = this.pickUnit(world.x, world.y);
         this.selected.clear();
@@ -749,6 +1067,10 @@ export class Game {
         break;
       }
       case 'move': {
+        if (this.placingBuild) {
+          this.cancelBuildMode();
+          break;
+        }
         const world = this.camera.screenToWorld(e.x, e.y);
         if (this.selected.size > 0) {
           this.commandMove(world.x, world.y);
@@ -770,6 +1092,8 @@ export class Game {
         }
         break;
       }
+      case 'rotate':
+        break;
     }
   }
 
@@ -811,22 +1135,28 @@ export class Game {
       }
       u.attackTarget = null;
       u.formationSlot = null;
+      u.structureTarget = null;
       i++;
     }
   }
 
   private handleRecruit(type: PlayerTroopType): void {
-    if (this.mode !== 'infinite' || !this.base) return;
+    if (this.mode !== 'infinite' && this.mode !== 'adventures') return;
+    if (this.mode === 'adventures' && type !== 'knight') return;
+    if (!this.base) return;
+    const cap = this.progression.troopCap(this.structures);
     const rec = CONFIG.recruits[type];
     if (!this.economy.canAfford(rec.cost)) {
       this.playSfx('denied', 'ui-denied', 0.3);
       this.ui.flashGoldInsufficient();
       this.pushMarker(this.base.x, this.base.y - this.base.radius, 'denied', 'OURO INSUFICIENTE');
+      this.ui.showToast('OURO INSUFICIENTE', 'alert');
       return;
     }
-    if (this.playerUnitCount + rec.count > this.settings.value.maxUnits) {
+    if (this.playerUnitCount + rec.count > cap) {
       this.playSfx('denied', 'ui-denied', 0.3);
       this.pushMarker(this.base.x, this.base.y - this.base.radius, 'denied', 'LIMITE DE TROPAS');
+      this.ui.showToast('LIMITE DE TROPAS ATINGIDO', 'alert');
       return;
     }
     const unit = this.recruit(type);
@@ -845,10 +1175,15 @@ export class Game {
   }
 
   private recruit(type: PlayerTroopType): Unit | null {
-    if (this.mode !== 'infinite' || !this.base) return null;
+    if (this.mode !== 'infinite' && this.mode !== 'adventures') return null;
+    if (!this.base) return null;
+    const cap = this.progression.troopCap(this.structures);
     const rec = CONFIG.recruits[type];
     if (!this.economy.canAfford(rec.cost)) return null;
-    if (this.playerUnitCount + rec.count > this.settings.value.maxUnits) return null;
+    if (this.playerUnitCount + rec.count > cap) {
+      this.ui.showToast('LIMITE DE TROPAS ATINGIDO', 'alert');
+      return null;
+    }
     this.economy.spend(rec.cost);
     const radius = this.base.radius + 14;
     let created: Unit | null = null;
@@ -860,7 +1195,7 @@ export class Game {
         type,
         this.base.x + Math.cos(angle) * radius,
         this.base.y + Math.sin(angle) * radius,
-        this.troopMods,
+        this.progression.modsFor(type),
       );
       this.units.push(unit);
       created = unit;
@@ -898,6 +1233,7 @@ export class Game {
       u.moveTarget = target;
       u.attackTarget = null;
       u.formationSlot = null;
+      u.structureTarget = null;
     }
     if (sq) {
       sq.mode = 'manual_moving';
@@ -943,65 +1279,126 @@ export class Game {
   }
 
   private onWaveComplete(wave: number): void {
-    const bonus = CONFIG.waves.clearBonusBase + wave * CONFIG.waves.clearBonusPerWave + this.econMods.waveBonus;
+    const bonus = CONFIG.waves.clearBonusBase + wave * CONFIG.waves.clearBonusPerWave;
     this.economy.add(bonus);
-    this.upgradeOptions = [];
+    if (wave % CONFIG.progression.diamonds.everyWaves === 0) {
+      this.progression.diamonds++;
+      this.ui.showToast('💎 +1 DIAMANTE!', 'success');
+    }
     this.playSfx('wave-complete', 'wave-complete', 0.5);
     this.ui.showToast(`WAVE ${wave} COMPLETA · +${Math.round(bonus)} OURO`, 'success');
   }
 
-  private applyUpgrade(id: UpgradeId): void {
-    switch (id) {
-      case 'damage':
-        this.troopMods.damage += CONFIG.upgrades.damage;
-        this.refreshTroops();
-        break;
-      case 'health':
-        this.troopMods.health += CONFIG.upgrades.health;
-        this.refreshTroops();
-        break;
-      case 'speed':
-        this.troopMods.speed += CONFIG.upgrades.speed;
-        this.refreshTroops();
-        break;
-      case 'attackSpeed':
-        this.troopMods.attackSpeed += CONFIG.upgrades.attackSpeed;
-        this.refreshTroops();
-        break;
-      case 'range':
-        this.troopMods.range += CONFIG.upgrades.range;
-        this.refreshTroops();
-        break;
-      case 'defense':
-        this.troopMods.defense = Math.min(0.6, this.troopMods.defense + CONFIG.upgrades.defense);
-        this.refreshTroops();
-        break;
-      case 'baseMaxHp':
-        if (this.base) {
-          this.base.maxHp += CONFIG.upgrades.baseMaxHp;
-          this.base.hp = Math.min(this.base.maxHp, this.base.hp + CONFIG.upgrades.baseMaxHp);
-        }
-        break;
-      case 'baseRepair':
-        if (this.base) this.base.hp = Math.min(this.base.maxHp, this.base.hp + CONFIG.upgrades.baseRepair);
-        break;
-      case 'mineIncome':
-        this.econMods.mineIncome += CONFIG.upgrades.mineIncome;
-        break;
-      case 'waveBonus':
-        this.econMods.waveBonus += CONFIG.upgrades.waveBonus;
-        break;
+  private tryUpgradeCastle(): void {
+    if (!this.base) return;
+    const prev = this.progression.castleHpBonus();
+    if (!this.progression.upgradeCastle(this.economy)) {
+      this.audio.playSfx('ui-denied');
+      return;
     }
-    this.recentUpgrades.push(id);
-    if (this.recentUpgrades.length > 5) this.recentUpgrades.shift();
-    this.upgradeOptions = [];
+    const delta = this.progression.castleHpBonus() - prev;
+    this.base.maxHp += delta;
+    this.base.hp = Math.min(this.base.maxHp, this.base.hp + delta);
+    this.refreshTowerCooldowns();
+    this.audio.playSfx('ui-click');
+    this.ui.showToast(`CASTELO NÍVEL ${this.progression.castleLevel} · HP +${delta}`, 'success');
   }
 
-  private refreshTroops(): void {
-    for (const u of this.units) {
-      if (!u.alive || u.team !== 'player') continue;
-      applyTroopMods(u, this.troopMods);
+  private tryUpgradeTroop(type: PlayerTroopType): void {
+    if (!this.progression.upgradeTroop(type, this.economy)) {
+      this.audio.playSfx('ui-denied');
+      return;
     }
+    this.refreshTroopClass(type);
+    this.audio.playSfx('ui-click');
+    this.ui.showToast(`${TROOP_LABELS[type]} AGORA É NÍVEL ${this.progression.troopLevels[type]}`, 'success');
+  }
+
+  private refreshTroopClass(type: PlayerTroopType): void {
+    const mods = this.progression.modsFor(type);
+    for (const u of this.units) {
+      if (!u.alive || u.team !== 'player' || u.troopType !== type) continue;
+      applyTroopMods(u, mods);
+    }
+  }
+
+  private refreshTowerCooldowns(): void {
+    const mult = this.progression.castleTowerMult();
+    for (const s of this.structures) {
+      if (!s.alive || s.kind !== 'tower' || !s.playerBuilt) continue;
+      s.attackCooldown = CONFIG.castle.towerCooldown * mult;
+    }
+  }
+
+  private toggleBuildMode(kind: BuildingKind): void {
+    if (this.placingBuild === kind) {
+      this.cancelBuildMode();
+      return;
+    }
+    if (this.mode !== 'infinite' && this.mode !== 'adventures') return;
+    if (this.progression.buildingCount(this.structures) >= this.progression.buildingCap()) {
+      this.audio.playSfx('ui-denied');
+      this.ui.showToast('LIMITE DE CONSTRUÇÕES ATINGIDO', 'alert');
+      return;
+    }
+    if (!this.economy.canAfford(buildingCost(kind))) {
+      this.audio.playSfx('ui-denied');
+      this.ui.showToast('OURO INSUFICIENTE', 'alert');
+      return;
+    }
+    this.placingBuild = kind;
+    this.ui.setPlacing(kind);
+    this.audio.playSfx('ui-click');
+  }
+
+  private cancelBuildMode(): void {
+    this.placingBuild = null;
+    this.ui.setPlacing(null);
+  }
+
+  private placeBuilding(screenX: number, screenY: number): void {
+    const kind = this.placingBuild;
+    if (!kind) return;
+    if (this.progression.buildingCount(this.structures) >= this.progression.buildingCap()) {
+      this.audio.playSfx('ui-denied');
+      this.ui.showToast('LIMITE DE CONSTRUÇÕES ATINGIDO', 'alert');
+      this.cancelBuildMode();
+      return;
+    }
+    const world = this.camera.screenToWorld(screenX, screenY);
+    const worldW = this.mode === 'adventures' ? CONFIG.adventure.worldW : CONFIG.world.width;
+    const worldH = this.mode === 'adventures' ? CONFIG.adventure.worldH : CONFIG.world.height;
+    if (!canPlaceBuilding(kind, world.x, world.y, this.units, this.structures, worldW, worldH)) {
+      this.audio.playSfx('ui-denied');
+      this.ui.showToast('NÃO PODE CONSTRUIR AQUI', 'alert');
+      return;
+    }
+    if (!this.economy.canAfford(buildingCost(kind))) {
+      this.audio.playSfx('ui-denied');
+      this.ui.showToast('OURO INSUFICIENTE', 'alert');
+      return;
+    }
+    this.economy.spend(buildingCost(kind));
+    this.structures.push(createBuilding(kind, world.x, world.y, this.progression.castleTowerMult()));
+    this.audio.playSfx('ui-click');
+    this.ui.showToast(`${BUILDING_NAMES[kind]} CONSTRUÍDA!`, 'success');
+  }
+
+  private updateBuildPreview(): void {
+    if (!this.placingBuild) {
+      this.buildPreview = null;
+      return;
+    }
+    const p = this.input.pointerScreen();
+    const w = this.camera.screenToWorld(p.x, p.y);
+    const worldW = this.mode === 'adventures' ? CONFIG.adventure.worldW : CONFIG.world.width;
+    const worldH = this.mode === 'adventures' ? CONFIG.adventure.worldH : CONFIG.world.height;
+    this.buildPreview = {
+      x: w.x,
+      y: w.y,
+      kind: this.placingBuild,
+      valid: canPlaceBuilding(this.placingBuild, w.x, w.y, this.units, this.structures, worldW, worldH),
+    };
   }
 
   private pruneSelection(): void {
@@ -1011,13 +1408,700 @@ export class Game {
     }
   }
 
-  private startMatch(): void {
+  private startMatch(difficulty: Difficulty = this.difficulty): void {
+    this.difficulty = difficulty;
     this.reset();
     this.screen = 'playing';
     this.ui.startGame();
+    this.ui.setProgressionVisible(true);
     this.audio.playMusic('battle');
     this.audio.setMusicLevel(this.settings.value.musicVolume * CONFIG.ui.prepareMusicFactor);
     this.audio.playSfx('ui-confirm');
+  }
+
+  private startAdventure(): void {
+    this.resetAdventure();
+    this.screen = 'playing';
+    this.ui.startGame();
+    this.audio.playMusic('battle');
+    this.audio.setMusicLevel(this.settings.value.musicVolume);
+    this.audio.playSfx('ui-confirm');
+  }
+
+  private showContinent(): void {
+    this.mode = null;
+    this.adventure = null;
+    this.screen = 'continent';
+    this.continentRegions = buildContinentRegions(this.adventureStore.phase1Completed);
+    this.ui.showContinent();
+    this.syncMusic();
+    this.audio.playSfx('ui-confirm');
+  }
+
+  private showCreative(): void {
+    this.mode = null;
+    this.screen = 'creative';
+    this.ui.showCreative();
+    this.syncMusic();
+    this.audio.playSfx('ui-confirm');
+  }
+
+  private startCreativeEditor(): void {
+    this.mode = null;
+    this.creativeScenario = createCreativeScenario(CONFIG.world.width, CONFIG.world.height);
+    this.creativeUnits = [];
+    this.creativeStructures = [];
+    this.creativeTeam = 'blue';
+    this.creativePlacing = null;
+    this.creativePhase = 'prep';
+    this.creativeCountdown = 0;
+    this.lastCreativeCount = -1;
+    this.creativeSelectedId = null;
+    this.creativeSpeed = 1;
+    this.ui.setCreativeSpeed(1);
+    this.projectiles = [];
+    this.markers.length = 0;
+    this.selected.clear();
+    this.camera.setWorldSize(CONFIG.world.width, CONFIG.world.height);
+    this.camera.x = CONFIG.world.width / 2;
+    this.camera.y = CONFIG.world.height / 2;
+    this.camera.zoom = 0.7;
+    this.screen = 'creative-editor';
+    this.ui.showCreativeEditor();
+    this.ui.setCreativeTeam('blue');
+    this.ui.setCreativePick(null);
+    this.ui.setCreativeLocked(false);
+    this.ui.updateCreativeCounts(0, 0);
+    this.syncMusic();
+    this.audio.playSfx('ui-confirm');
+  }
+
+  private exitCreativeEditor(): void {
+    this.creativeScenario = null;
+    this.creativeUnits = [];
+    this.creativeStructures = [];
+    this.creativePhase = 'prep';
+    this.creativeCountdown = 0;
+    this.creativeSelectedId = null;
+    this.creativePlacing = null;
+    this.screen = 'creative';
+    this.ui.showCreative();
+    this.syncMusic();
+    this.audio.playSfx('ui-click');
+  }
+
+  private handleCreativeEvent(e: InputEvent): void {
+    if (this.creativePhase !== 'prep') {
+      if (e.type === 'drag' && !this.creativePlacing) {
+        this.camera.move(-(e.x2 - e.x1) / this.camera.zoom, -(e.y2 - e.y1) / this.camera.zoom);
+      }
+      return;
+    }
+    switch (e.type) {
+      case 'select': {
+        const world = this.camera.screenToWorld(e.x, e.y);
+        if (this.creativePlacing) {
+          this.placeCreativeEntity(world.x, world.y);
+        } else {
+          this.selectCreativeEntity(world.x, world.y);
+        }
+        break;
+      }
+      case 'drag': {
+        if (this.creativePlacing) break;
+        const a = this.camera.screenToWorld(e.x1, e.y1);
+        const b = this.camera.screenToWorld(e.x2, e.y2);
+        const entity = this.creativeEntityAt(a.x, a.y);
+        if (entity) {
+          this.creativeSelectedId = entity.id;
+          this.moveCreativeEntity(entity.id, b.x, b.y);
+          this.audio.playSfx('ui-click');
+        } else {
+          this.camera.move(-(e.x2 - e.x1) / this.camera.zoom, -(e.y2 - e.y1) / this.camera.zoom);
+        }
+        break;
+      }
+      case 'move': {
+        if (this.creativePlacing) {
+          this.setCreativePlacing(null);
+          break;
+        }
+        const world = this.camera.screenToWorld(e.x, e.y);
+        const entity = this.creativeEntityAt(world.x, world.y);
+        if (entity) {
+          this.creativeSelectedId = entity.id;
+          this.moveCreativeEntity(entity.id, world.x, world.y);
+          this.audio.playSfx('ui-click');
+        } else if (this.creativeSelectedId !== null) {
+          this.moveCreativeEntity(this.creativeSelectedId, world.x, world.y);
+          this.audio.playSfx('ui-click');
+        }
+        break;
+      }
+      case 'rotate': {
+        if (this.creativePlacing && this.creativePlacing.kind === 'structure') {
+          this.creativeRotation = (this.creativeRotation + 90) % 360;
+          this.audio.playSfx('ui-formation');
+        }
+        break;
+      }
+      case 'recruit':
+      case 'formation':
+        break;
+    }
+  }
+
+  private updateCreative(dt: number): void {
+    this.input.updateCamera(this.camera, dt);
+    if (this.creativePaused) return;
+    if (this.creativePhase === 'countdown') {
+      this.creativeCountdown -= dt;
+      const sec = Math.ceil(this.creativeCountdown);
+      if (sec !== this.lastCreativeCount) {
+        this.lastCreativeCount = sec;
+        this.audio.playSfx(sec > 1 ? 'prep-tick' : 'ui-select');
+      }
+      if (this.creativeCountdown <= 0) {
+        this.creativePhase = 'battle';
+        this.lastCreativeCount = -1;
+        this.creativeBattleFlash = 1;
+        this.beginCreativeBattle();
+        this.audio.playSfx('wave-start');
+      }
+      return;
+    }
+    if (this.creativePhase === 'battle') {
+      if (this.creativeBattleFlash > 0) this.creativeBattleFlash = Math.max(0, this.creativeBattleFlash - dt * 1.4);
+      this.updateCreativeBattle(dt * this.creativeSpeed);
+    }
+  }
+
+  private setCreativeTeam(team: CreativeTeam): void {
+    if (this.creativePhase !== 'prep') return;
+    this.creativeTeam = team;
+    this.ui.setCreativeTeam(team);
+    this.ui.setCreativePick(this.creativePlacing);
+    this.audio.playSfx('ui-click');
+  }
+
+  private setCreativeSpeed(speed: 1 | 2 | 4): void {
+    this.creativeSpeed = speed;
+    this.ui.setCreativeSpeed(speed);
+    this.audio.playSfx('ui-click');
+  }
+
+  private handleCreativePick(pick: CreativePick): void {
+    if (this.creativePhase !== 'prep') return;
+    const same = this.creativePlacing !== null && this.creativePlacing.kind === pick.kind && this.creativePlacing.type === pick.type;
+    this.setCreativePlacing(same ? null : pick);
+  }
+
+  private setCreativePlacing(pick: CreativePick | null): void {
+    this.creativePlacing = pick;
+    this.creativeRotation = 0;
+    this.creativeSelectedId = null;
+    this.ui.setCreativePick(pick);
+    if (pick) this.audio.playSfx('ui-select');
+  }
+
+  private handleCreativeRemove(): void {
+    if (this.creativePhase !== 'prep' || this.creativeSelectedId === null) {
+      this.audio.playSfx('ui-denied');
+      return;
+    }
+    this.removeCreativeEntity(this.creativeSelectedId);
+    this.creativeSelectedId = null;
+    this.audio.playSfx('ui-click');
+  }
+
+  private startCreativeBattle(): void {
+    if (this.creativePhase !== 'prep' || !this.creativeScenario) return;
+    let blue = 0;
+    let red = 0;
+    for (const e of this.creativeScenario.entities) {
+      if (e.team === 'blue') blue++;
+      else red++;
+    }
+    if (blue === 0 || red === 0) {
+      this.ui.showToast('MONTE OS DOIS TIMES ANTES DE COMEÇAR', 'alert');
+      this.audio.playSfx('ui-denied');
+      return;
+    }
+    let combat = 0;
+    for (const e of this.creativeScenario.entities) {
+      if (e.kind === 'unit') combat++;
+      else if (e.type === 'base' || e.type === 'tower') combat++;
+    }
+    if (combat === 0) {
+      this.ui.showToast('ADICIONE PELO MENOS UMA ENTIDADE DE COMBATE', 'alert');
+      this.audio.playSfx('ui-denied');
+      return;
+    }
+    this.creativeSelectedId = null;
+    this.setCreativePlacing(null);
+    this.creativePhase = 'countdown';
+    this.creativeCountdown = 3;
+    this.lastCreativeCount = -1;
+    this.ui.setCreativeLocked(true);
+    this.audio.playSfx('ui-confirm');
+  }
+
+  private beginCreativeBattle(): void {
+    this.creativeBlueHadBase = this.creativeStructures.some((s) => s.kind === 'base' && s.team === 'player');
+    this.creativeRedHadBase = this.creativeStructures.some((s) => s.kind === 'base' && s.team === 'enemy');
+    this.creativeBlueEconomy.gold = CONFIG.economy.startingGold;
+    this.creativeRedEconomy.gold = CONFIG.economy.startingGold;
+    this.creativeKills = { blue: 0, red: 0 };
+    this.creativeElapsed = 0;
+    this.creativeResultShown = false;
+    this.creativePaused = false;
+    this.creativeRecruitTimers = { blue: 0, red: 0 };
+    this.creativeAi.reset();
+    this.creativeBlueAlivePrev = this.creativeUnits.filter((u) => u.alive && u.team === 'player').length;
+    this.creativeRedAlivePrev = this.creativeUnits.filter((u) => u.alive && u.team === 'enemy').length;
+    for (const u of this.creativeUnits) u.aiControl = true;
+    this.ui.setCreativeBattleTime(0);
+    this.ui.setCreativeTroopCounts(this.creativeBlueAlivePrev, this.creativeRedAlivePrev);
+    this.ui.setCreativeSpeed(this.creativeSpeed);
+  }
+
+  private updateCreativeBattle(dt: number): void {
+    this.creativeElapsed += dt;
+    this.grid.clear();
+    for (const u of this.creativeUnits) {
+      if (u.alive) this.grid.insert(u);
+    }
+
+    const { spawned, hits } = updateCombat(this.creativeUnits, this.creativeStructures, this.grid, this.economy, dt);
+    this.projectiles.push(...spawned);
+    const towerShots = updateTowers(this.creativeStructures, this.grid, this.projectiles, dt);
+    const projHits = updateProjectiles(this.projectiles, dt);
+    this.projectiles = this.projectiles.filter((p) => p.alive);
+    const allHits = hits.length > 0 || projHits.length > 0 ? [...hits, ...projHits] : hits;
+    if (allHits.length > 0) this.applyHits(allHits);
+    this.playCombatSounds(allHits, spawned);
+    if (towerShots > 0) this.playSfx('tower', 'tower-shot', 0.06);
+
+    this.creativeAi.update('blue', this.creativeUnits, this.creativeStructures, dt);
+    this.creativeAi.update('red', this.creativeUnits, this.creativeStructures, dt);
+
+    updateUnits(this.creativeUnits, this.grid, this.creativeStructures, dt);
+    updateCreativeCaptures(this.creativeStructures, this.creativeUnits, dt);
+
+    for (const team of ['blue', 'red'] as CreativeTeam[]) {
+      this.creativeRecruitTimers[team] += dt;
+      if (this.creativeRecruitTimers[team] >= 2) {
+        this.creativeRecruitTimers[team] = 0;
+        this.creativeRecruit(team);
+      }
+      this.updateCreativeEconomy(team, dt);
+    }
+
+    for (const u of this.creativeUnits) {
+      if (!u.alive) this.pushMarker(u.x, u.y, 'death');
+    }
+    this.creativeUnits = this.creativeUnits.filter((u) => u.alive);
+    this.creativeStructures = this.creativeStructures.filter((s) => s.alive);
+    for (const s of this.creativeStructures) if (s.flashTimer > 0) s.flashTimer -= dt;
+    this.updateCreativeKills();
+    this.ui.setCreativeBattleTime(this.creativeElapsed);
+    this.ui.setCreativeTroopCounts(
+      this.creativeUnits.filter((u) => u.alive && u.team === 'player').length,
+      this.creativeUnits.filter((u) => u.alive && u.team === 'enemy').length,
+    );
+
+    if (!this.creativeResultShown) {
+      const winner = this.creativeWinner();
+      if (winner) {
+        this.creativeResultShown = true;
+        this.audio.playSfx('wave-start');
+        this.showCreativeResult(winner);
+      }
+    }
+  }
+
+  private updateCreativeKills(): void {
+    const blueAlive = this.creativeUnits.filter((u) => u.alive && u.team === 'player').length;
+    const redAlive = this.creativeUnits.filter((u) => u.alive && u.team === 'enemy').length;
+    this.creativeKills.blue += Math.max(0, this.creativeRedAlivePrev - redAlive);
+    this.creativeKills.red += Math.max(0, this.creativeBlueAlivePrev - blueAlive);
+    this.creativeBlueAlivePrev = blueAlive;
+    this.creativeRedAlivePrev = redAlive;
+  }
+
+  private updateCreativeEconomy(team: CreativeTeam, dt: number): void {
+    const unitTeam = creativeTeamOf(team);
+    let income = CONFIG.economy.passiveGoldPerSecond;
+    for (const s of this.creativeStructures) {
+      if (!s.alive) continue;
+      if (s.kind === 'mine' && s.owner === unitTeam) income += CONFIG.mine.goldPerSecond;
+      else if (s.kind === 'market' && s.team === unitTeam) income += CONFIG.progression.buildings.market.goldPerSecond;
+    }
+    const economy = team === 'blue' ? this.creativeBlueEconomy : this.creativeRedEconomy;
+    economy.update(dt, income);
+  }
+
+  private creativeTroopCap(team: CreativeTeam): number {
+    const unitTeam = creativeTeamOf(team);
+    let houses = 0;
+    for (const s of this.creativeStructures) {
+      if (s.alive && s.kind === 'house' && s.team === unitTeam) houses++;
+    }
+    return 50 + houses * 10;
+  }
+
+  private creativeRecruit(team: CreativeTeam): void {
+    if (this.creativeResultShown) return;
+    const unitTeam = creativeTeamOf(team);
+    const economy = team === 'blue' ? this.creativeBlueEconomy : this.creativeRedEconomy;
+    const base = this.creativeStructures.find((s) => s.alive && s.kind === 'base' && s.team === unitTeam);
+    if (!base) return;
+    const count = this.creativeUnits.reduce((acc, u) => acc + (u.alive && u.team === unitTeam ? 1 : 0), 0);
+    if (count >= this.creativeTroopCap(team)) return;
+    const weights: [PlayerTroopType, number][] = [
+      ['knight', 3],
+      ['archer', 2],
+      ['tank', 2],
+      ['champion', 1],
+    ];
+    let total = 0;
+    for (const [, w] of weights) total += w;
+    let roll = Math.random() * total;
+    let type: PlayerTroopType = 'knight';
+    for (const [t, w] of weights) {
+      roll -= w;
+      if (roll <= 0) {
+        type = t;
+        break;
+      }
+    }
+    const cost = CONFIG.recruits[type].cost;
+    if (economy.gold < cost) return;
+    economy.spend(cost);
+    const offset = 60 + Math.random() * 30;
+    const u = createUnit(unitTeam, type, base.x + (unitTeam === 'enemy' ? offset : -offset), base.y + (Math.random() * 40 - 20));
+    u.aiControl = true;
+    this.creativeUnits.push(u);
+    this.audio.playSfx(RECRUIT_SFX[type]);
+  }
+
+  private creativeWinner(): CreativeTeam | null {
+    const blueBase = this.creativeStructures.some((s) => s.alive && s.kind === 'base' && s.team === 'player');
+    const redBase = this.creativeStructures.some((s) => s.alive && s.kind === 'base' && s.team === 'enemy');
+    if (this.creativeBlueHadBase && !blueBase) return 'red';
+    if (this.creativeRedHadBase && !redBase) return 'blue';
+    const blueAlive = this.creativeUnits.some((u) => u.alive && u.team === 'player');
+    const blueTowers = this.creativeStructures.some((s) => s.alive && s.kind === 'tower' && s.team === 'player');
+    const redAlive = this.creativeUnits.some((u) => u.alive && u.team === 'enemy');
+    const redTowers = this.creativeStructures.some((s) => s.alive && s.kind === 'tower' && s.team === 'enemy');
+    if (!blueAlive && !blueTowers && !blueBase) return 'red';
+    if (!redAlive && !redTowers && !redBase) return 'blue';
+    if (!blueBase && !redBase) {
+      if (!blueAlive && !blueTowers) return 'red';
+      if (!redAlive && !redTowers) return 'blue';
+      if (!blueAlive && !blueTowers && !redAlive && !redTowers) return 'blue';
+    }
+    return null;
+  }
+
+  private showCreativeResult(winner: CreativeTeam): void {
+    const blueRemaining = this.creativeUnits.filter((u) => u.alive && u.team === 'player').length;
+    const redRemaining = this.creativeUnits.filter((u) => u.alive && u.team === 'enemy').length;
+    this.ui.showCreativeResult(
+      winner,
+      this.creativeElapsed,
+      blueRemaining,
+      redRemaining,
+      this.creativeKills.blue,
+      this.creativeKills.red,
+      this.creativeKills.red,
+      this.creativeKills.blue,
+    );
+  }
+
+  private retryCreativeBattle(): void {
+    const scenario = this.creativeScenario;
+    if (!scenario) return;
+    this.creativeUnits = [];
+    this.creativeStructures = [];
+    for (const e of scenario.entities) {
+      if (e.kind === 'unit') {
+        const u = createCreativeUnit(e);
+        u.creativeId = e.id;
+        this.creativeUnits.push(u);
+      } else {
+        const s = createCreativeStructure(e);
+        s.creativeId = e.id;
+        this.creativeStructures.push(s);
+      }
+    }
+    this.projectiles = [];
+    this.markers.length = 0;
+    this.creativePhase = 'countdown';
+    this.creativeCountdown = 3;
+    this.lastCreativeCount = -1;
+    this.creativeResultShown = false;
+    this.creativePaused = false;
+    this.ui.setCreativeLocked(true);
+    this.screen = 'creative-editor';
+    this.ui.showCreativeEditor();
+    this.audio.playSfx('ui-confirm');
+  }
+
+  private editCreativeScenario(): void {
+    const scenario = this.creativeScenario;
+    if (!scenario) return;
+    this.creativeUnits = [];
+    this.creativeStructures = [];
+    for (const e of scenario.entities) {
+      if (e.kind === 'unit') {
+        const u = createCreativeUnit(e);
+        u.creativeId = e.id;
+        this.creativeUnits.push(u);
+      } else {
+        const s = createCreativeStructure(e);
+        s.creativeId = e.id;
+        this.creativeStructures.push(s);
+      }
+    }
+    this.projectiles = [];
+    this.markers.length = 0;
+    this.creativePhase = 'prep';
+    this.creativeCountdown = 0;
+    this.creativeSelectedId = null;
+    this.setCreativePlacing(null);
+    this.creativePaused = false;
+    this.creativeResultShown = false;
+    this.ui.setCreativeLocked(false);
+    this.screen = 'creative-editor';
+    this.ui.showCreativeEditor();
+    this.syncCreativeCounts();
+    this.audio.playSfx('ui-confirm');
+  }
+
+  private creativeEntityAt(x: number, y: number): CreativeEntity | null {
+    const scenario = this.creativeScenario;
+    if (!scenario) return null;
+    let best: CreativeEntity | null = null;
+    let bestSq = Infinity;
+    for (const e of scenario.entities) {
+      const r = creativeEntityRadius(e);
+      const dx = e.x - x;
+      const dy = e.y - y;
+      const d = dx * dx + dy * dy;
+      if (d < r * r && d < bestSq) {
+        bestSq = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  private selectCreativeEntity(x: number, y: number): void {
+    const entity = this.creativeEntityAt(x, y);
+    this.creativeSelectedId = entity ? entity.id : null;
+    if (entity) this.audio.playSfx('ui-select');
+  }
+
+  private placeCreativeEntity(x: number, y: number): void {
+    const scenario = this.creativeScenario;
+    const pick = this.creativePlacing;
+    if (!scenario || !pick) return;
+    const r = creativePickRadius(pick, this.creativeTeam);
+    const cx = Math.max(r, Math.min(scenario.width - r, x));
+    const cy = Math.max(r, Math.min(scenario.height - r, y));
+    if (!this.creativePlaceValid(cx, cy, r, this.creativeTeam)) {
+      this.audio.playSfx('ui-denied');
+      return;
+    }
+    const entity = addCreativeEntity(scenario, this.creativeTeam, pick.kind, pick.type, cx, cy, this.creativeRotation);
+    if (entity.kind === 'unit') {
+      const u = createCreativeUnit(entity);
+      u.creativeId = entity.id;
+      this.creativeUnits.push(u);
+    } else {
+      const s = createCreativeStructure(entity);
+      s.creativeId = entity.id;
+      this.creativeStructures.push(s);
+    }
+    this.syncCreativeCounts();
+    this.audio.playSfx(pick.kind === 'unit' ? 'ui-select' : 'ui-click');
+  }
+
+  private moveCreativeEntity(id: number, x: number, y: number): void {
+    const scenario = this.creativeScenario;
+    if (!scenario) return;
+    const entity = scenario.entities.find((e) => e.id === id);
+    if (!entity) return;
+    const r = creativeEntityRadius(entity);
+    const center = scenario.width / 2;
+    let cx = Math.max(r, Math.min(scenario.width - r, x));
+    let cy = Math.max(r, Math.min(scenario.height - r, y));
+    if (entity.team === 'blue') cx = Math.min(cx, center - r);
+    else cx = Math.max(cx, center + r);
+    moveCreativeEntity(scenario, id, cx, cy);
+    if (entity.kind === 'unit') {
+      const u = this.creativeUnits.find((unit) => unit.creativeId === id);
+      if (u) {
+        u.x = cx;
+        u.y = cy;
+      }
+    } else {
+      const s = this.creativeStructures.find((st) => st.creativeId === id);
+      if (s) {
+        s.x = cx;
+        s.y = cy;
+      }
+    }
+  }
+
+  private removeCreativeEntity(id: number): void {
+    const scenario = this.creativeScenario;
+    if (!scenario) return;
+    if (this.creativeUnits.some((u) => u.creativeId === id)) {
+      const i = this.creativeUnits.findIndex((u) => u.creativeId === id);
+      if (i >= 0) this.creativeUnits.splice(i, 1);
+    } else {
+      const i = this.creativeStructures.findIndex((s) => s.creativeId === id);
+      if (i >= 0) this.creativeStructures.splice(i, 1);
+    }
+    removeCreativeEntity(scenario, id);
+    this.syncCreativeCounts();
+  }
+
+  private syncCreativeCounts(): void {
+    const scenario = this.creativeScenario;
+    if (!scenario) return;
+    let blue = 0;
+    let red = 0;
+    for (const e of scenario.entities) {
+      if (e.team === 'blue') blue++;
+      else red++;
+    }
+    this.ui.updateCreativeCounts(blue, red);
+  }
+
+  private creativePlaceValid(x: number, y: number, r: number, team: CreativeTeam): boolean {
+    const scenario = this.creativeScenario;
+    if (!scenario) return false;
+    if (x - r < 0 || x + r > scenario.width || y - r < 0 || y + r > scenario.height) return false;
+    const center = scenario.width / 2;
+    if (team === 'blue' && x >= center) return false;
+    if (team === 'red' && x < center) return false;
+    for (const e of scenario.entities) {
+      const er = creativeEntityRadius(e);
+      const dx = e.x - x;
+      const dy = e.y - y;
+      const min = er + r;
+      if (dx * dx + dy * dy < min * min) return false;
+    }
+    return true;
+  }
+
+  private creativeView(): CreativeEditorView {
+    let ghost: CreativeGhost | null = null;
+    if (this.creativePlacing) {
+      const p = this.input.pointerScreen();
+      const w = this.camera.screenToWorld(p.x, p.y);
+      const r = creativePickRadius(this.creativePlacing, this.creativeTeam);
+      const dims = creativePickDims(this.creativePlacing, this.creativeTeam, this.creativeRotation);
+      ghost = {
+        x: w.x,
+        y: w.y,
+        valid: this.creativePlaceValid(w.x, w.y, r, this.creativeTeam),
+        team: this.creativeTeam,
+        unit: this.creativePlacing.kind === 'unit',
+        size: r,
+        w: dims.w,
+        h: dims.h,
+      };
+    }
+    let selected: CreativeSelected | null = null;
+    if (this.creativeSelectedId !== null && this.creativeScenario) {
+      const e = this.creativeScenario.entities.find((en) => en.id === this.creativeSelectedId);
+      if (e) {
+        selected = {
+          x: e.x,
+          y: e.y,
+          r: creativeEntityRadius(e),
+          color: e.team === 'blue' ? '#38b6ff' : '#ff4655',
+          unit: e.kind === 'unit',
+        };
+      }
+    }
+    return { phase: this.creativePhase, countdown: this.creativeCountdown, ghost, selected, flash: this.creativeBattleFlash };
+  }
+
+  private continentView(): ContinentView {
+    return {
+      regions: this.continentRegions,
+      discovered: continentDiscovered(this.continentRegions),
+      total: this.continentRegions.length,
+    };
+  }
+
+  private handleContinentClick(screenX: number, screenY: number): void {
+    const t = continentTransform(window.innerWidth, window.innerHeight);
+    const back = regionScreenRect(CONTINENT_BACK_BUTTON, t);
+    if (screenX >= back.x && screenX < back.x + back.w && screenY >= back.y && screenY < back.y + back.h) {
+      this.screen = 'modes';
+      this.ui.showModes();
+      this.syncMusic();
+      this.audio.playSfx('ui-click');
+      return;
+    }
+    for (const r of this.continentRegions) {
+      const rect = regionScreenRect(r, t);
+      if (screenX < rect.x || screenX >= rect.x + rect.w) continue;
+      if (screenY < rect.y || screenY >= rect.y + rect.h) continue;
+      if (r.phase === 1) {
+        this.startAdventure();
+      } else {
+        this.ui.showToast('EM DESENVOLVIMENTO', 'info');
+        this.audio.playSfx('ui-denied');
+      }
+      return;
+    }
+  }
+
+  private resetAdventure(): void {
+    this.mode = 'adventures';
+    this.level = null;
+    this.levelNumber = 0;
+    this.storyElapsed = 0;
+    this.storyRoute = [];
+    this.projectiles = [];
+    this.storyResultShown = false;
+    this.storyOver = false;
+    this.adventure = new AdventureLevel();
+    this.units = this.adventure.units;
+    this.structures = this.adventure.structures;
+    this.base = this.structures[0];
+    this.adventureElapsed = 0;
+    this.adventureOver = false;
+    this.adventureResultShown = false;
+    this.gameOver = false;
+    this.goldDelta = 0;
+    this.markers.length = 0;
+    this.selected.clear();
+    this.economy.gold = CONFIG.adventure.startingGold;
+    this.playerUnitCount = 0;
+    this.progression.reset();
+    this.placingBuild = null;
+    this.buildPreview = null;
+    this.renderedBiome = 'field';
+    this.biomeTransition = -1;
+    this.lastPrepSec = -1;
+    this.lastAliveWalls = -1;
+    this.lastAliveTowers = -1;
+    this.lastMines = -1;
+    this.lastBaseHp = -1;
+    this.lastEnemyBaseHp = -1;
+    resetAutoFormation();
+    this.ui.setMode('adventures');
+    this.camera.setWorldSize(CONFIG.adventure.worldW, CONFIG.adventure.worldH);
+    this.camera.x = CONFIG.adventure.playerBase.x;
+    this.camera.y = CONFIG.adventure.playerBase.y;
   }
 
   private startStoryLevel(levelNumber: number): void {
@@ -1059,6 +2143,13 @@ export class Game {
   }
 
   private resume(): void {
+    if (this.creativePaused) {
+      this.creativePaused = false;
+      this.screen = 'creative-editor';
+      this.ui.showCreativeEditor();
+      this.audio.playSfx('ui-confirm');
+      return;
+    }
     this.screen = 'playing';
     this.ui.hidePause();
     this.audio.playSfx('ui-confirm');
@@ -1070,13 +2161,16 @@ export class Game {
     this.level = null;
     this.ui.setMode('infinite');
     this.ui.showMenu();
+    this.creativePaused = false;
+    this.creativeResultShown = false;
+    this.creativePhase = 'prep';
     this.audio.stopAmbient();
     this.audio.playSfx('ui-click');
     this.syncMusic();
   }
 
   private syncMusic(): void {
-    if (this.screen === 'menu' || this.screen === 'modes' || this.screen === 'storyselect') {
+    if (this.screen === 'menu' || this.screen === 'modes' || this.screen === 'difficulty' || this.screen === 'creative' || this.screen === 'storyselect' || this.screen === 'continent') {
       this.audio.playMusic('menu');
     } else {
       this.audio.playMusic('battle');
@@ -1085,6 +2179,7 @@ export class Game {
 
   private handlePauseKey(): void {
     if (this.mode === 'story' && this.storyResultShown) return;
+    if (this.mode === 'adventures' && this.adventureResultShown) return;
     if (this.ui.isOverlayOpen()) {
       this.ui.closeOverlays();
       return;
@@ -1100,6 +2195,27 @@ export class Game {
       this.ui.showMenu();
       this.syncMusic();
     } else if (this.screen === 'storyselect') {
+      this.screen = 'modes';
+      this.ui.showModes();
+      this.syncMusic();
+    } else if (this.screen === 'creative') {
+      this.screen = 'modes';
+      this.ui.showModes();
+      this.syncMusic();
+    } else if (this.screen === 'creative-editor') {
+      if (this.creativePhase === 'battle' || this.creativePhase === 'countdown') {
+        if (this.creativeResultShown) return;
+        if (this.creativePaused) {
+          this.creativePaused = false;
+          this.ui.showCreativeEditor();
+        } else {
+          this.creativePaused = true;
+          this.ui.showPause('CRIATIVO — PAUSADO');
+        }
+      } else {
+        this.exitCreativeEditor();
+      }
+    } else if (this.screen === 'continent') {
       this.screen = 'modes';
       this.ui.showModes();
       this.syncMusic();

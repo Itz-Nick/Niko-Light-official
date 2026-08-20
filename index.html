@@ -53,6 +53,11 @@
         z-index: 20;
       }
 
+      .screen--backdrop {
+        background: rgba(6, 9, 14, 0.4);
+        backdrop-filter: none;
+      }
+
       .panel {
         background: var(--panel);
         border: 1px solid var(--border);
@@ -104,16 +109,18 @@
         border: 1px solid var(--border);
         border-radius: 8px;
         cursor: pointer;
-        transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+        transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
       }
 
       .btn:hover {
         background: rgba(255, 255, 255, 0.09);
         border-color: rgba(255, 255, 255, 0.2);
+        box-shadow: 0 0 0 1px rgba(56, 182, 255, 0.25), 0 4px 14px rgba(56, 182, 255, 0.16);
       }
 
       .btn:active {
-        transform: scale(0.98);
+        transform: scale(0.97);
+        box-shadow: 0 0 0 1px rgba(56, 182, 255, 0.45);
       }
 
       .btn-primary {
@@ -144,13 +151,15 @@
 
       .modes-grid {
         display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
         gap: 16px;
         margin-bottom: 18px;
       }
 
       .mode-card {
-        flex: 1;
-        min-width: 170px;
+        flex: 0 1 190px;
+        min-width: 172px;
         padding: 20px 16px;
         border: 1px solid var(--border);
         border-radius: 12px;
@@ -159,40 +168,69 @@
         flex-direction: column;
         align-items: center;
         gap: 10px;
+        position: relative;
+        overflow: hidden;
       }
 
       .mode-available {
         border-color: rgba(56, 182, 255, 0.5);
-        background: rgba(56, 182, 255, 0.08);
-        box-shadow: 0 0 26px rgba(56, 182, 255, 0.16);
+        background: linear-gradient(180deg, rgba(56, 182, 255, 0.13), rgba(56, 182, 255, 0.04));
+        box-shadow: 0 0 26px rgba(56, 182, 255, 0.16), inset 0 0 18px rgba(56, 182, 255, 0.05);
       }
 
       .mode-available:hover {
+        transform: translateY(-3px) scale(1.035);
         border-color: var(--blue);
+        box-shadow: 0 12px 32px rgba(56, 182, 255, 0.3), 0 0 0 1px rgba(56, 182, 255, 0.35), inset 0 0 26px rgba(56, 182, 255, 0.1);
       }
 
-      .mode-locked {
-        opacity: 0.65;
-        background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.02) 0 8px, transparent 8px 16px);
+      .mode-card.lock-shake,
+      .side-card.lock-shake {
+        animation: mode-lock-shake 0.45s ease;
+        border-color: rgba(255, 143, 163, 0.6);
+        box-shadow: 0 0 20px rgba(255, 70, 85, 0.2);
       }
 
-      .mode-locked .btn:disabled {
-        border-style: dashed;
-        background: rgba(255, 255, 255, 0.03);
+      .mode-card.lock-shake .lock,
+      .side-card.lock-shake .lock {
+        animation: lock-wobble 0.45s ease;
+        filter: drop-shadow(0 0 6px rgba(255, 70, 85, 0.9));
+      }
+
+      @keyframes mode-lock-shake {
+        0%, 100% {
+          transform: translateX(0);
+        }
+        20% {
+          transform: translateX(-5px) rotate(-0.5deg);
+        }
+        45% {
+          transform: translateX(5px) rotate(0.5deg);
+        }
+        70% {
+          transform: translateX(-3px);
+        }
+        85% {
+          transform: translateX(2px);
+        }
+      }
+
+      @keyframes lock-wobble {
+        0%, 100% {
+          transform: rotate(0);
+        }
+        35% {
+          transform: rotate(-24deg) scale(1.18);
+        }
+        70% {
+          transform: rotate(20deg) scale(1.18);
+        }
       }
 
       .mode-name {
         margin: 0;
         font-size: 18px;
         letter-spacing: 0.5px;
-      }
-
-      .mode-locked .mode-name {
-        color: var(--muted);
-      }
-
-      .mode-name .lock {
-        font-size: 13px;
       }
 
       .mode-desc {
@@ -449,6 +487,39 @@
         text-align: right;
       }
 
+      .enemy-bar {
+        border-color: rgba(255, 70, 85, 0.7);
+        box-shadow: 0 0 10px rgba(255, 70, 85, 0.25);
+      }
+
+      .enemy-fill {
+        background: linear-gradient(90deg, #8f1b28, #ff4655);
+      }
+
+      .enemy-castle.crit .enemy-fill {
+        background: linear-gradient(90deg, #5c0e16, #b82333);
+      }
+
+      .enemy-hp {
+        color: #ff4655;
+      }
+
+      .mode-tag {
+        color: var(--gold);
+      }
+
+      #objectiveBanner {
+        font-size: 13px;
+        font-weight: 700;
+        color: #ffd166;
+        padding: 5px 12px;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid rgba(255, 209, 102, 0.4);
+        border-radius: 8px;
+        text-shadow: 0 0 8px rgba(255, 209, 102, 0.35);
+        white-space: nowrap;
+      }
+
       #tutorial {
         position: fixed;
         bottom: 18px;
@@ -675,22 +746,6 @@
         letter-spacing: 0.4px;
       }
 
-      .checklist {
-        margin: 0 0 20px;
-        padding: 0;
-        list-style: none;
-        text-align: left;
-        font-size: 15px;
-        line-height: 2;
-        color: var(--text);
-      }
-
-      .checklist li::before {
-        content: '✓ ';
-        color: var(--green);
-        font-weight: 700;
-      }
-
       .army-panel {
         display: flex;
         flex-direction: column;
@@ -783,46 +838,290 @@
         pointer-events: auto;
       }
 
-      #upgrades {
+      #progression {
         position: fixed;
-        top: 116px;
-        left: 50%;
-        transform: translateX(-50%);
-        display: flex;
-        gap: 10px;
-        z-index: 10;
+        top: 64px;
+        right: 12px;
+        width: 260px;
+        max-height: calc(100vh - 90px);
+        overflow-y: auto;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 14px 10px;
+        z-index: 12;
+        pointer-events: auto;
+        user-select: none;
+        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
       }
 
-      #upgrades .upgrade-btn {
-        padding: 10px 16px;
-        min-width: 150px;
-        border: none;
-        border-radius: 8px;
-        background: rgba(0, 0, 0, 0.65);
+      #progression::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      #progression::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.14);
+        border-radius: 4px;
+      }
+
+      #progression:not([hidden]) {
+        animation: prog-in 0.22s ease;
+      }
+
+      @keyframes prog-in {
+        from {
+          opacity: 0;
+          transform: translateX(10px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      .prog-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        font-size: 14px;
+        letter-spacing: 1.5px;
+        color: var(--blue-bright);
+      }
+
+      .prog-close {
+        width: 24px;
+        height: 24px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 11px;
+        line-height: 1;
+      }
+
+      .prog-close:hover {
         color: var(--text);
+        border-color: var(--gold);
+      }
+
+      .prog-gems {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        margin-bottom: 10px;
+        border: 1px solid rgba(255, 209, 102, 0.35);
+        border-radius: 8px;
+        background: rgba(255, 209, 102, 0.08);
         font-size: 13px;
+        color: var(--gold);
+      }
+
+      .prog-gems b {
+        font-size: 16px;
+      }
+
+      .prog-section {
+        margin: 0 0 14px;
+      }
+
+      .prog-section h4 {
+        margin: 0 0 8px;
+        padding-bottom: 5px;
+        font-size: 12px;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--blue-bright);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+      }
+
+      .prog-build-count {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .prog-pips {
+        display: flex;
+        gap: 5px;
+        margin: 6px 0;
+      }
+
+      .prog-pips .pip {
+        width: 16px;
+        height: 8px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid var(--border);
+      }
+
+      .prog-pips .pip.on {
+        background: var(--gold);
+        border-color: var(--gold);
+        box-shadow: 0 0 8px rgba(255, 209, 102, 0.5);
+      }
+
+      .prog-pips.troop {
+        margin: 0;
+        flex: 1;
+        justify-content: center;
+      }
+
+      .prog-pips.troop .pip {
+        width: 12px;
+        height: 7px;
+      }
+
+      .prog-info {
+        font-size: 11px;
+        color: var(--muted);
+        margin: 4px 0 6px;
+        line-height: 1.35;
+      }
+
+      .prog-info.warn {
+        color: var(--red);
+        font-weight: 700;
+      }
+
+      .prog-btn {
+        width: 100%;
+        margin: 4px 0;
+        padding: 9px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        border-radius: 7px;
         cursor: pointer;
         text-align: center;
-        line-height: 1.4;
-        pointer-events: auto;
-        transition: background 0.15s ease, outline 0.15s ease;
+        line-height: 1.35;
+        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
       }
 
-      #upgrades .upgrade-btn:hover {
-        background: rgba(56, 182, 255, 0.35);
-        outline: 1px solid var(--blue);
+      .prog-btn:hover:not(:disabled) {
+        background: rgba(56, 182, 255, 0.16);
+        border-color: var(--blue);
+        box-shadow: 0 0 0 1px rgba(56, 182, 255, 0.35);
       }
 
-      #upgrades .upgrade-btn small {
+      .prog-btn small {
         display: block;
         color: var(--muted);
-        margin-top: 4px;
+        font-size: 10px;
+        margin-top: 2px;
+      }
+
+      .prog-btn.active {
+        border-color: var(--red);
+        background: rgba(255, 70, 85, 0.14);
+      }
+
+      .prog-btn.small {
+        width: auto;
+        min-width: 96px;
+        margin: 0;
+        padding: 6px 8px;
+        font-size: 10px;
+        line-height: 1.2;
+        flex: none;
+      }
+
+      .prog-troop-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 5px 0;
+      }
+
+      .prog-troop-name {
+        flex: none;
+        min-width: 108px;
+        font-size: 12px;
+      }
+
+      .prog-buildings {
+        display: flex;
+        gap: 6px;
+      }
+
+      .prog-buildings .prog-btn {
+        padding: 8px 4px;
+        font-size: 11px;
+      }
+
+      #build-hint {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 16px;
+        background: rgba(0, 0, 0, 0.82);
+        border: 1px solid rgba(255, 209, 102, 0.5);
+        border-radius: 9px;
+        color: var(--gold);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        z-index: 12;
+        pointer-events: none;
+      }
+
+      .prog-open {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        pointer-events: auto;
+        white-space: nowrap;
+      }
+
+      .prog-open:hover {
+        border-color: var(--gold);
+        background: rgba(255, 209, 102, 0.1);
+      }
+
+      .prog-open #prog-hud {
+        color: var(--gold);
+        font-size: 11px;
       }
 
       /* ---------- POLISH 1: feedback, legibility, quality of life ---------- */
 
-      .screen {
-        animation: screen-in 0.16s ease;
+      .screen-enter {
+        animation: screen-in 0.18s ease;
+      }
+
+      .screen-exit {
+        animation: screen-out 0.16s ease forwards;
+        pointer-events: none;
+      }
+
+      #storywin.screen-enter {
+        animation: screen-in-gold 0.26s ease;
+      }
+
+      #storylose.screen-enter,
+      #gameover.screen-enter {
+        animation: screen-in-dark 0.22s ease;
+      }
+
+      #storylose.screen-exit,
+      #gameover.screen-exit {
+        animation: screen-out-dark 0.16s ease forwards;
+        pointer-events: none;
       }
 
       @keyframes screen-in {
@@ -833,6 +1132,56 @@
         to {
           opacity: 1;
           transform: none;
+        }
+      }
+
+      @keyframes screen-out {
+        from {
+          opacity: 1;
+          transform: none;
+        }
+        to {
+          opacity: 0;
+          transform: scale(1.012);
+        }
+      }
+
+      @keyframes screen-in-gold {
+        from {
+          opacity: 0;
+          transform: scale(0.96);
+          filter: brightness(1.35);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+          filter: none;
+        }
+      }
+
+      @keyframes screen-in-dark {
+        from {
+          opacity: 0;
+          transform: scale(1.012);
+          filter: brightness(0.65);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+          filter: none;
+        }
+      }
+
+      @keyframes screen-out-dark {
+        from {
+          opacity: 1;
+          transform: none;
+          filter: none;
+        }
+        to {
+          opacity: 0;
+          transform: scale(1.005);
+          filter: brightness(0.7);
         }
       }
 
@@ -1026,6 +1375,962 @@
       .setting input[type='range'] {
         cursor: pointer;
       }
+
+      /* ---------- POLISH 3: identidade visual, blocos, telas e responsividade ---------- */
+
+      .panel {
+        max-height: calc(100vh - 36px);
+        overflow-y: auto;
+      }
+
+      #settings .panel,
+      #controls .panel {
+        min-width: 480px;
+        text-align: left;
+      }
+
+      #storywin .panel,
+      #storylose .panel,
+      #campaigncomplete .panel {
+        min-width: 420px;
+      }
+
+      /* Menu principal */
+      .menu-title-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        margin-bottom: 4px;
+      }
+
+      .logo-mark {
+        position: relative;
+        display: inline-flex;
+        width: 56px;
+        height: 56px;
+        flex: 0 0 auto;
+        filter: drop-shadow(0 0 12px rgba(110, 200, 255, 0.8));
+        animation: logo-mark-pulse 3.2s ease-in-out infinite;
+      }
+
+      .logo-mark svg {
+        width: 100%;
+        height: 100%;
+      }
+
+      .logo-mark::after {
+        content: '';
+        position: absolute;
+        inset: -4px;
+        border-radius: 16px;
+        background: linear-gradient(115deg, transparent 32%, rgba(255, 255, 255, 0.55) 50%, transparent 68%);
+        background-size: 250% 100%;
+        background-position: 100% 0;
+        animation: logo-shine 6s ease-in-out infinite;
+        pointer-events: none;
+      }
+
+      @keyframes logo-mark-pulse {
+        0%, 100% {
+          filter: drop-shadow(0 0 12px rgba(110, 200, 255, 0.6));
+          transform: scale(1);
+        }
+        50% {
+          filter: drop-shadow(0 0 26px rgba(140, 215, 255, 1));
+          transform: scale(1.06);
+        }
+      }
+
+      @keyframes logo-shine {
+        0%, 74% {
+          background-position: 100% 0;
+          opacity: 0;
+        }
+        82% {
+          background-position: -40% 0;
+          opacity: 0.7;
+        }
+        94%, 100% {
+          background-position: -40% 0;
+          opacity: 0;
+        }
+      }
+
+      .title {
+        font-size: 62px;
+        text-shadow: 0 0 30px rgba(56, 182, 255, 0.45);
+      }
+
+      .title-accent {
+        color: var(--blue-bright);
+        animation: title-glow 3.2s ease-in-out infinite;
+      }
+
+      @keyframes title-glow {
+        0%,
+        100% {
+          text-shadow: 0 0 26px rgba(140, 215, 255, 0.8);
+        }
+        50% {
+          text-shadow: 0 0 54px rgba(140, 215, 255, 1);
+        }
+      }
+
+      #menu .panel {
+        padding: 46px 54px;
+        background: linear-gradient(180deg, rgba(20, 27, 36, 0.8), rgba(9, 13, 19, 0.86));
+        border: 1px solid rgba(56, 182, 255, 0.22);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6), 0 0 48px rgba(56, 182, 255, 0.14), inset 0 0 34px rgba(56, 182, 255, 0.05);
+        backdrop-filter: blur(7px);
+      }
+
+      #modes .panel {
+        background: linear-gradient(180deg, rgba(20, 27, 36, 0.78), rgba(9, 13, 19, 0.84));
+        border: 1px solid rgba(56, 182, 255, 0.18);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), 0 0 40px rgba(56, 182, 255, 0.1);
+        backdrop-filter: blur(7px);
+      }
+
+      #menu .btn {
+        padding: 14px 18px;
+        font-size: 16px;
+        margin: 12px 0;
+      }
+
+      #menu .btn-primary {
+        box-shadow: 0 6px 24px rgba(56, 182, 255, 0.3);
+      }
+
+      #menu .btn:hover {
+        transform: translateY(-1px) scale(1.02);
+      }
+
+      #menu .btn:active {
+        transform: translateY(0) scale(0.96);
+      }
+
+      .menu-foot {
+        margin: 16px 0 0;
+        padding-top: 14px;
+        border-top: 1px solid var(--border);
+        font-size: 11px;
+        letter-spacing: 2.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      /* Cards laterais do menu principal */
+      .menu-layout {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 32px;
+        padding: 24px;
+        max-height: calc(100vh - 32px);
+      }
+
+      .side-card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 132px;
+        padding: 22px 12px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.03);
+        cursor: pointer;
+        user-select: none;
+        text-align: center;
+        overflow: hidden;
+        transition: transform 0.15s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+      }
+
+      .side-icon {
+        font-size: 30px;
+        line-height: 1;
+      }
+
+      .side-name {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 1px;
+      }
+
+      .side-name .lock {
+        display: inline-block;
+        font-size: 13px;
+      }
+
+      .mode-card .lock {
+        display: inline-block;
+        font-size: 14px;
+      }
+
+      .side-note {
+        font-size: 10px;
+        color: var(--muted);
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+      }
+
+      .side-creative {
+        border-color: rgba(255, 190, 92, 0.5);
+        background: linear-gradient(180deg, rgba(255, 190, 92, 0.12), rgba(255, 190, 92, 0.03));
+        box-shadow: 0 0 24px rgba(255, 190, 92, 0.14), inset 0 0 18px rgba(255, 190, 92, 0.05);
+      }
+
+      .side-creative::before,
+      .side-creative::after {
+        content: '⚙';
+        position: absolute;
+        font-size: 20px;
+        opacity: 0.22;
+        pointer-events: none;
+        animation: gear-spin 9s linear infinite;
+      }
+
+      .side-creative::before {
+        top: 6px;
+        left: 6px;
+      }
+
+      .side-creative::after {
+        bottom: 6px;
+        right: 6px;
+        animation-direction: reverse;
+        animation-duration: 12s;
+      }
+
+      @keyframes gear-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .side-creative:hover {
+        transform: translateY(-3px) scale(1.04);
+        border-color: #ffc266;
+        box-shadow: 0 12px 30px rgba(255, 190, 92, 0.3), 0 0 0 1px rgba(255, 190, 92, 0.4), inset 0 0 26px rgba(255, 190, 92, 0.12);
+      }
+
+      .side-coop {
+        border-color: rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.02);
+        box-shadow: none;
+        cursor: not-allowed;
+      }
+
+      .side-coop .side-icon {
+        filter: grayscale(0.35);
+      }
+
+      .side-coop:hover {
+        border-color: rgba(255, 143, 163, 0.45);
+        box-shadow: 0 0 18px rgba(255, 70, 85, 0.18);
+      }
+
+      /* Telas de modo */
+      .mode-card {
+        padding: 22px 18px;
+      }
+
+      .mode-icon {
+        font-size: 34px;
+        line-height: 1;
+        filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+      }
+
+      .mode-name {
+        font-size: 20px;
+      }
+
+      .mode-desc {
+        font-size: 13px;
+      }
+
+      .mode-progress {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--gold);
+        min-height: 10px;
+      }
+
+      .mode-stars {
+        display: flex;
+        gap: 3px;
+      }
+
+      .mode-stars .seg {
+        width: 9px;
+        height: 10px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .mode-stars .seg.on {
+        background: var(--gold);
+        box-shadow: 0 0 8px rgba(255, 209, 102, 0.7);
+      }
+
+      .mode-card .btn {
+        margin-top: 4px;
+      }
+
+      /* Tela do modo Criativo */
+      .panel--creative {
+        position: relative;
+        overflow: hidden;
+        background: linear-gradient(180deg, rgba(24, 30, 38, 0.92), rgba(13, 17, 23, 0.94));
+        border: 1px solid rgba(255, 190, 92, 0.4);
+        box-shadow: 0 14px 46px rgba(0, 0, 0, 0.6), 0 0 42px rgba(255, 190, 92, 0.12), inset 0 0 30px rgba(255, 190, 92, 0.05);
+      }
+
+      .panel--creative .mode-icon {
+        font-size: 46px;
+        filter: drop-shadow(0 4px 14px rgba(255, 190, 92, 0.5));
+      }
+
+      .panel--creative::before,
+      .panel--creative::after {
+        position: absolute;
+        font-size: 40px;
+        opacity: 0.16;
+        pointer-events: none;
+        animation: creative-float 7s ease-in-out infinite;
+      }
+
+      .panel--creative::before {
+        content: '⚙';
+        top: 8px;
+        left: 12px;
+        animation-delay: -2s;
+      }
+
+      .panel--creative::after {
+        content: '🔩';
+        bottom: 8px;
+        right: 12px;
+        animation-delay: -4s;
+      }
+
+      @keyframes creative-float {
+        0%, 100% {
+          transform: translateY(0) rotate(-8deg);
+        }
+        50% {
+          transform: translateY(12px) rotate(10deg);
+        }
+      }
+
+      .creative-subtitle {
+        margin: 0 0 6px;
+        font-size: 16px;
+        color: var(--blue-bright);
+        letter-spacing: 1px;
+      }
+
+      .creative-desc {
+        margin: 0 0 24px;
+        font-size: 14px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      /* Editor do modo Criativo */
+      .screen--editor {
+        display: block;
+        background: transparent;
+        backdrop-filter: none;
+        pointer-events: none;
+      }
+
+      .creative-hud {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 14px;
+        background: linear-gradient(180deg, rgba(10, 14, 20, 0.72), rgba(6, 9, 14, 0.94));
+        border-top: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5);
+        pointer-events: auto;
+        flex-wrap: wrap;
+        z-index: 2;
+      }
+
+      .creative-hud.locked {
+        opacity: 0.8;
+      }
+
+      .creative-hud.team-blue {
+        border-top-color: rgba(56, 182, 255, 0.75);
+        box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(56, 182, 255, 0.25), 0 -2px 22px rgba(56, 182, 255, 0.25);
+      }
+
+      .creative-hud.team-red {
+        border-top-color: rgba(255, 70, 85, 0.75);
+        box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 70, 85, 0.25), 0 -2px 22px rgba(255, 70, 85, 0.25);
+      }
+
+      .creative-current {
+        padding: 5px 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.4);
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+      }
+
+      .creative-hud.team-blue .creative-current {
+        color: #9ed8ff;
+        border-color: rgba(56, 182, 255, 0.7);
+        background: rgba(56, 182, 255, 0.12);
+      }
+
+      .creative-hud.team-red .creative-current {
+        color: #ffb3bc;
+        border-color: rgba(255, 70, 85, 0.7);
+        background: rgba(255, 70, 85, 0.12);
+      }
+
+      .creative-battle-time {
+        color: #e8c56a;
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+      }
+
+      .creative-spectator {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .spec-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.4);
+        font-size: 13px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .spec-counts b {
+        font-variant-numeric: tabular-nums;
+      }
+
+      .spec-blue {
+        color: #9ed8ff;
+      }
+
+      .spec-red {
+        color: #ffb3bc;
+      }
+
+      .spec-hint {
+        color: rgba(255, 255, 255, 0.6);
+        font-weight: 600;
+        font-size: 12px;
+      }
+
+      .spec-speed {
+        gap: 2px;
+        padding: 3px;
+        border-radius: 10px;
+      }
+
+      .spec-speed-btn {
+        padding: 4px 10px;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 12px;
+        font-weight: 800;
+        cursor: pointer;
+        transition: all 0.12s ease;
+      }
+
+      .spec-speed-btn:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .spec-speed-btn.active {
+        color: #0a0e14;
+        background: #ffd166;
+        border-color: rgba(255, 209, 102, 0.6);
+      }
+
+      .spec-pause {
+        margin-left: 2px;
+      }
+
+      .creative-hud-left,
+      .creative-hud-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .creative-hud-mid {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .creative-seg {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.4);
+      }
+
+      .team-btn {
+        padding: 6px 14px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .team-btn span {
+        margin-left: 4px;
+        font-size: 11px;
+        opacity: 0.7;
+      }
+
+      .team-btn--blue.active {
+        background: rgba(56, 182, 255, 0.18);
+        border-color: rgba(56, 182, 255, 0.7);
+        color: #9ed8ff;
+      }
+
+      .team-btn--red.active {
+        background: rgba(255, 70, 85, 0.18);
+        border-color: rgba(255, 70, 85, 0.7);
+        color: #ffb3bc;
+      }
+
+      .creative-palette {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+
+      .palette-btn {
+        padding: 6px 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.05);
+        color: #dfe6ee;
+        font: inherit;
+        font-size: 12px;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .palette-btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.35);
+      }
+
+      .palette-btn.active {
+        background: rgba(255, 190, 92, 0.16);
+        border-color: rgba(255, 190, 92, 0.75);
+        color: #ffe3b0;
+        box-shadow: 0 0 10px rgba(255, 190, 92, 0.25);
+      }
+
+      .palette-sep {
+        width: 1px;
+        height: 22px;
+        margin: 0 4px;
+        background: rgba(255, 255, 255, 0.18);
+      }
+
+      .creative-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .creative-start {
+        min-width: 190px;
+      }
+
+      /* HUD em blocos */
+      .hud-panel {
+        gap: 10px;
+        padding: 10px 12px;
+      }
+
+      .hud-block {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 8px 12px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 9px;
+      }
+
+      #hud[hidden] {
+        display: none;
+      }
+
+      /* Progresso da campanha */
+      .campaign-progress-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: 0 0 16px;
+        padding: 12px 14px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        text-align: left;
+      }
+
+      .campaign-progress-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .campaign-progress-head b {
+        color: var(--text);
+      }
+
+      .campaign-progress-head .campaign-stars {
+        color: var(--gold);
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .campaign-bar {
+        height: 10px;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+
+      .campaign-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #2bb673, var(--green));
+        transition: width 0.3s ease;
+      }
+
+      /* Cards de fase */
+      .story-grid {
+        padding-top: 14px;
+      }
+
+      .story-card {
+        flex: 0 1 210px;
+        min-width: 190px;
+        padding: 18px 12px 12px;
+        position: relative;
+      }
+
+      .story-num {
+        position: absolute;
+        top: -11px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 3px 12px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 1px;
+        background: #151b23;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .story-completed .story-num {
+        color: var(--green);
+        border-color: rgba(80, 200, 120, 0.55);
+      }
+
+      .story-available .story-num {
+        color: var(--gold);
+        border-color: rgba(255, 209, 102, 0.55);
+      }
+
+      .story-card h3 {
+        font-size: 15px;
+      }
+
+      .story-card p {
+        font-size: 11.5px;
+      }
+
+      .story-card .stars {
+        font-size: 16px;
+      }
+
+      .story-card .btn {
+        font-size: 13px;
+        padding: 9px 12px;
+        margin: 4px 0 0;
+      }
+
+      .story-card.story-next {
+        border-color: var(--gold);
+        box-shadow: 0 0 30px rgba(255, 209, 102, 0.28), inset 0 0 18px rgba(255, 209, 102, 0.08);
+      }
+
+      .story-card.story-next:hover {
+        transform: translateY(-2px);
+      }
+
+      /* Resultado de vitória/derrota */
+      .result-title {
+        margin: 0 0 4px;
+        font-size: 30px;
+        font-weight: 800;
+        letter-spacing: 1px;
+        color: var(--gold);
+      }
+
+      .result-subtitle {
+        margin: 0 0 10px;
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      #creativeResultWinner {
+        font-size: 24px;
+        font-weight: 800;
+        letter-spacing: 1px;
+        margin-bottom: 16px;
+      }
+
+      #creativeResultWinner.winner-blue {
+        color: #56c4ff;
+        text-shadow: 0 0 18px rgba(56, 182, 255, 0.55);
+      }
+
+      #creativeResultWinner.winner-red {
+        color: #ff7a8a;
+        text-shadow: 0 0 18px rgba(255, 70, 85, 0.55);
+      }
+
+      .result-section-title {
+        margin: 18px 0 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--blue-bright);
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 6px;
+      }
+
+      .result-objective {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.5;
+        text-align: left;
+        color: var(--text);
+      }
+
+      .result-objective strong {
+        color: var(--green);
+      }
+
+      .result-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 4px;
+        text-align: left;
+      }
+
+      .result-grid .cell {
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+
+      .result-grid .cell span {
+        display: block;
+        font-size: 10px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .result-grid .cell b {
+        font-size: 15px;
+        color: var(--text);
+      }
+
+      .lose-subtitle {
+        margin: 0 0 6px;
+        font-size: 15px;
+        color: var(--muted);
+      }
+
+      .lose-encourage {
+        margin: 16px 0 18px;
+        font-size: 14px;
+        font-style: italic;
+        color: var(--muted);
+      }
+
+      /* Configurações em categorias */
+      .settings-section {
+        margin: 8px 0 16px;
+      }
+
+      .settings-section h4 {
+        margin: 0 0 4px;
+        padding-bottom: 6px;
+        font-size: 12px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--blue-bright);
+        border-bottom: 1px solid var(--border);
+      }
+
+      /* Controles em grupos */
+      .controls-group {
+        margin: 8px 0 16px;
+      }
+
+      .controls-group h4 {
+        margin: 0 0 4px;
+        padding-bottom: 6px;
+        font-size: 12px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--blue-bright);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .controls-group .controls-table {
+        margin-bottom: 0;
+      }
+
+      /* Micro animação do toast */
+      #toast.show {
+        animation: toast-pop 0.18s ease;
+      }
+
+      @keyframes toast-pop {
+        from {
+          transform: translate(-50%, -5px);
+          opacity: 0;
+        }
+        to {
+          transform: translate(-50%, 0);
+          opacity: 1;
+        }
+      }
+
+      /* Responsividade */
+      @media (max-height: 760px) {
+        .title {
+          font-size: 48px;
+        }
+        #menu .panel {
+          padding: 28px 36px;
+        }
+        .panel {
+          padding: 24px 28px;
+        }
+        .hud-panel {
+          gap: 6px;
+        }
+        .hud-block {
+          gap: 10px;
+          padding: 6px 10px;
+        }
+      }
+
+      @media (max-width: 1180px) {
+        .story-card {
+          flex: 0 1 195px;
+          min-width: 175px;
+        }
+      }
+
+      @media (max-width: 900px) {
+        #settings .panel,
+        #controls .panel,
+        #storywin .panel,
+        #storylose .panel,
+        #campaigncomplete .panel {
+          min-width: 0;
+          width: min(94vw, 520px);
+        }
+        .result-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 820px) {
+        .menu-layout {
+          flex-direction: column;
+          gap: 14px;
+          padding: 12px;
+        }
+        .side-card {
+          flex-direction: row;
+          width: 240px;
+          padding: 10px 18px;
+          justify-content: flex-start;
+          gap: 12px;
+        }
+      }
+
+      @media (max-height: 700px) and (max-width: 820px) {
+        .menu-layout {
+          overflow-y: auto;
+          justify-content: flex-start;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1033,43 +2338,68 @@
 
     <div id="hud" hidden>
       <div class="hud-panel">
-        <div class="hud-stat" id="stat-gold">
-          <span class="hud-label">💰 Ouro</span>
-          <span class="hud-value gold" id="gold">0</span>
-          <span class="gold-gain" id="goldGain"></span>
-        </div>
-        <div class="hud-stat" id="stat-wave">
-          <span class="hud-label">🌊 Wave</span>
-          <span class="hud-value wave" id="wave">0</span>
-          <span class="wave-status" id="waveStatus"></span>
-        </div>
-        <div class="hud-stat" id="stat-troops">
-          <span class="hud-label">🪖 Tropas</span>
-          <span class="hud-value units" id="units">0</span>
-        </div>
-        <div class="hud-stat army-panel" id="stat-army">
-          <span class="hud-label">Exército</span>
-          <div class="army-rows">
-            <button class="army-btn" id="army-knight" title="Cavaleiros"><kbd>E</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
-            <button class="army-btn" id="army-archer" title="Arqueiros"><kbd>F</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
-            <button class="army-btn" id="army-tank" title="Tanques"><kbd>C</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
-            <button class="army-btn" id="army-champion" title="Campeões"><kbd>G</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
+        <div class="hud-block" id="block-resources">
+          <div class="hud-stat" id="stat-gold">
+            <span class="hud-label">💰 Ouro</span>
+            <span class="hud-value gold" id="gold">0</span>
+            <span class="gold-gain" id="goldGain"></span>
           </div>
         </div>
-        <div class="base-bar-wrap" id="stat-base">
-          <span class="hud-label">🏰 Castelo</span>
-          <div class="base-bar"><div class="base-fill" id="baseFill"></div></div>
-          <span class="base-hp" id="baseHp">100%</span>
+        <div class="hud-block" id="block-wave">
+          <div class="hud-stat" id="stat-wave">
+            <span class="hud-label">🌊 Wave</span>
+            <span class="hud-value wave" id="wave">0</span>
+            <span class="wave-status" id="waveStatus"></span>
+          </div>
         </div>
-        <div class="base-bar-wrap" id="stat-cart" hidden>
-          <span class="hud-label">🚚 Carroça</span>
-          <div class="base-bar cart-bar"><div class="base-fill cart-fill" id="cartFill"></div></div>
-          <span class="base-hp cart-hp" id="cartHp">0/0</span>
+        <div class="hud-block" id="block-army">
+          <div class="hud-stat" id="stat-troops">
+            <span class="hud-label">🪖 Exército</span>
+            <span class="hud-value units" id="units">0</span>
+          </div>
+          <div class="hud-stat army-panel" id="stat-army">
+            <span class="hud-label">Exército</span>
+            <div class="army-rows">
+              <button class="army-btn" id="army-knight" title="Cavaleiros"><kbd>E</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
+              <button class="army-btn" id="army-archer" title="Arqueiros"><kbd>F</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
+              <button class="army-btn" id="army-tank" title="Tanques"><kbd>C</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
+              <button class="army-btn" id="army-champion" title="Campeões"><kbd>G</kbd><b></b><span class="army-count">0</span><span class="army-cost">0</span></button>
+            </div>
+          </div>
         </div>
-        <div class="boss-bar-wrap" id="bossBar" hidden>
-          <span class="boss-name" id="bossName">SENHOR DA RUÍNA</span>
-          <div class="boss-bar"><div class="boss-fill" id="bossFill"></div></div>
-          <span class="boss-hp" id="bossHp">100%</span>
+        <div class="hud-block" id="block-castle">
+          <div class="base-bar-wrap" id="stat-base">
+            <span class="hud-label">🏰 Castelo</span>
+            <div class="base-bar"><div class="base-fill" id="baseFill"></div></div>
+            <span class="base-hp" id="baseHp">100%</span>
+          </div>
+          <div class="base-bar-wrap" id="stat-cart" hidden>
+            <span class="hud-label">🚚 Carroça</span>
+            <div class="base-bar cart-bar"><div class="base-fill cart-fill" id="cartFill"></div></div>
+            <span class="base-hp cart-hp" id="cartHp">0/0</span>
+          </div>
+          <div class="boss-bar-wrap" id="bossBar" hidden>
+            <span class="boss-name" id="bossName">SENHOR DA RUÍNA</span>
+            <div class="boss-bar"><div class="boss-fill" id="bossFill"></div></div>
+            <span class="boss-hp" id="bossHp">100%</span>
+          </div>
+        </div>
+        <div class="hud-block" id="block-progress">
+          <button class="prog-open" id="btn-progress" title="Progressão">
+            📈 <span id="prog-hud">🏰1 💎0</span>
+          </button>
+        </div>
+        <div class="hud-block" id="block-adventure" hidden>
+          <div class="hud-stat" id="block-mode" hidden>
+            <span class="hud-label">⚔️ Modo</span>
+            <span class="hud-value mode-tag">Aventuras</span>
+          </div>
+          <div id="objectiveBanner" hidden>🎯 Destrua o castelo inimigo</div>
+          <div class="base-bar-wrap enemy-castle" id="enemyCastleBar" hidden>
+            <span class="hud-label">🗡️ Castelo inimigo</span>
+            <div class="base-bar enemy-bar"><div class="base-fill enemy-fill" id="enemyCastleFill"></div></div>
+            <span class="base-hp enemy-hp" id="enemyCastleHp">100%</span>
+          </div>
         </div>
       </div>
       <div id="tutorial" hidden>
@@ -1081,48 +2411,203 @@
         <div class="countdown" id="prepCountdown"><span class="cd-label">PRÓXIMA WAVE EM</span><span class="cd-secs" id="prepSecs">30</span><span class="cd-unit">s</span></div>
         <button class="btn btn-primary start-wave" id="btn-start-wave">Começar agora</button>
       </div>
-      <div id="upgrades"></div>
+      <div id="progression" hidden>
+        <div class="prog-head">
+          <b>PROGRESSÃO</b>
+          <button class="prog-close" id="prog-close" title="Fechar">✕</button>
+        </div>
+        <div class="prog-gems">
+          <span>💎 Diamantes</span>
+          <b id="prog-diamonds">0</b>
+        </div>
+        <section class="prog-section">
+          <h4>🏰 Castelo</h4>
+          <div class="prog-pips" id="prog-castle-pips"></div>
+          <div class="prog-info" id="prog-castle-info">Nível 1/5 · HP +0 · Torres ×1.00 · Cap 6</div>
+          <button class="prog-btn" id="prog-castle-btn">MELHORAR · 🪙200</button>
+        </section>
+        <section class="prog-section">
+          <h4>⚔️ Tropas</h4>
+          <div id="prog-troops"></div>
+        </section>
+        <section class="prog-section">
+          <h4>🏗️ Construções <span class="prog-build-count" id="prog-build-count">0/6</span></h4>
+          <div class="prog-buildings">
+            <button class="prog-btn" id="prog-build-house">🏠 Casa<br><small>🪙60</small></button>
+            <button class="prog-btn" id="prog-build-market">🏪 Mercado<br><small>🪙120</small></button>
+            <button class="prog-btn" id="prog-build-tower">🗼 Torre<br><small>🪙500</small></button>
+          </div>
+          <div class="prog-info" id="prog-build-info">0/6 construções usadas</div>
+        </section>
+      </div>
+      <div id="build-hint" hidden>CLIQUE NO MAPA PARA COLOCAR · CLIQUE DIREITO OU ESC PARA CANCELAR</div>
     </div>
     <div class="hud-fps" id="fps" hidden></div>
     <div id="toast"></div>
 
-    <div id="menu" class="screen">
-      <div class="panel">
-        <h1 class="title">Niko<span class="title-accent">Light</span></h1>
-        <p class="subtitle">Estratégia em tempo real</p>
-        <button class="btn btn-primary" id="btn-play">Jogar</button>
-        <button class="btn" id="btn-controls">Controles</button>
-        <button class="btn" id="btn-settings">Configurações</button>
+    <div id="menu" class="screen screen--backdrop">
+      <div class="menu-layout">
+        <div class="side-card side-creative" id="menu-creative-card" title="Criativo">
+          <span class="side-icon">🛠️</span>
+          <span class="side-name">Criativo</span>
+          <span class="side-note">desbloqueado</span>
+        </div>
+        <div class="panel">
+          <div class="menu-title-wrap">
+            <span class="logo-mark">
+              <svg viewBox="0 0 32 32" aria-hidden="true">
+                <defs>
+                  <linearGradient id="lg-bolt" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#d2f1ff"></stop>
+                    <stop offset="1" stop-color="#38b6ff"></stop>
+                  </linearGradient>
+                </defs>
+                <path d="M17 1 6 18h6L10 31 26 12h-7L22 1Z" fill="url(#lg-bolt)" stroke="#eaf8ff" stroke-width="0.7" stroke-linejoin="round"></path>
+              </svg>
+            </span>
+            <h1 class="title">Niko<span class="title-accent">Light</span></h1>
+          </div>
+          <p class="subtitle">Estratégia em tempo real</p>
+          <button class="btn btn-primary" id="btn-play">Jogar</button>
+          <button class="btn" id="btn-controls">Controles</button>
+          <button class="btn" id="btn-settings">Configurações</button>
+          <p class="menu-foot">Selecione, recrute e domine o campo de batalha</p>
+        </div>
+        <div class="side-card side-coop" id="menu-coop-card" title="COOP">
+          <span class="side-icon">🤝</span>
+          <span class="side-name">COOP <span class="lock" id="menu-coop-lock">🔒</span></span>
+          <span class="side-note">em desenvolvimento</span>
+        </div>
       </div>
     </div>
 
-    <div id="modes" class="screen" hidden>
+    <div id="modes" class="screen screen--backdrop" hidden>
       <div class="panel">
         <h2>Modo de jogo</h2>
         <div class="modes-grid">
           <div class="mode-card mode-available">
+            <span class="mode-icon">♾️</span>
             <h3 class="mode-name">Infinito</h3>
-            <p class="mode-desc">Sobreviva o máximo possível às waves.</p>
+            <p class="mode-desc">Sobreviva o máximo possível às waves e enfrente inimigos cada vez mais fortes.</p>
             <button class="btn btn-primary" id="btn-mode-infinite">Jogar</button>
           </div>
           <div class="mode-card mode-available">
+            <span class="mode-icon">📖</span>
             <h3 class="mode-name">História</h3>
-            <p class="mode-desc">Campanha narrativa. Fase 1 disponível.</p>
+            <p class="mode-desc" id="mode-story-desc">Campanha narrativa com 10 fases progressivas e uma batalha final.</p>
+            <div class="mode-progress" id="mode-story-progress" hidden>
+              <span id="mode-story-progress-text"></span>
+              <span class="mode-stars" id="mode-story-stars"></span>
+            </div>
             <button class="btn btn-primary" id="btn-mode-story">Jogar</button>
           </div>
-          <div class="mode-card mode-locked">
-            <h3 class="mode-name">Aventuras <span class="lock">🔒</span></h3>
-            <p class="mode-desc">Desafios, cenários especiais e modos alternativos.</p>
-            <button class="btn" disabled>Coming Soon</button>
+          <div class="mode-card mode-available">
+            <span class="mode-icon">🗺️</span>
+            <h3 class="mode-name">Aventuras</h3>
+            <p class="mode-desc">Explore o continente, conquiste recursos e destrua os castelos inimigos.</p>
+            <button class="btn btn-primary" id="btn-mode-adventure">Jogar</button>
           </div>
         </div>
         <button class="btn" id="btn-modes-back">Voltar</button>
       </div>
     </div>
 
+    <div id="difficulty" class="screen screen--backdrop" hidden>
+      <div class="panel">
+        <h2>Escolha a dificuldade</h2>
+        <div class="modes-grid" id="difficulty-grid">
+          <div class="mode-card mode-available" data-difficulty="easy">
+            <span class="mode-icon">🟢</span>
+            <h3 class="mode-name">Fácil</h3>
+            <p class="mode-desc">Campeão e construções extras, com inimigos mais lentos e em menor número.</p>
+            <button class="btn btn-primary" type="button">Jogar</button>
+          </div>
+          <div class="mode-card mode-available" data-difficulty="medium">
+            <span class="mode-icon">🟡</span>
+            <h3 class="mode-name">Médio</h3>
+            <p class="mode-desc">A experiência clássica do Infinito, com crescimento padrão.</p>
+            <button class="btn btn-primary" type="button">Jogar</button>
+          </div>
+          <div class="mode-card mode-available" data-difficulty="hard">
+            <span class="mode-icon">🔴</span>
+            <h3 class="mode-name">Difícil</h3>
+            <p class="mode-desc">Sem vantagens iniciais e inimigos mais fortes e numerosos.</p>
+            <button class="btn btn-primary" type="button">Jogar</button>
+          </div>
+          <div class="mode-card" data-difficulty="hardcore">
+            <span class="mode-icon">⚫</span>
+            <h3 class="mode-name">Hardcore <span class="lock">🔒</span></h3>
+            <p class="mode-desc">Uma única vida. Apenas os fortes sobrevivem.</p>
+            <span class="side-note">em desenvolvimento</span>
+          </div>
+        </div>
+        <button class="btn" id="btn-difficulty-back">Voltar</button>
+      </div>
+    </div>
+
+    <div id="creative" class="screen screen--backdrop" hidden>
+      <div class="panel panel--creative">
+        <span class="mode-icon">🛠️</span>
+        <h2>CRIE SUA HISTÓRIA</h2>
+        <p class="creative-subtitle">Modo Criativo</p>
+        <p class="creative-desc">Construa batalhas personalizadas e assista os dois times lutarem.<br>Monte o seu exército de um lado, o inimigo do outro e comece a batalha.</p>
+        <button class="btn btn-primary" id="btn-creative-start-editor">Entrar no Editor</button>
+        <button class="btn" id="btn-creative-back">Voltar</button>
+      </div>
+    </div>
+
+    <div id="creative-editor" class="screen screen--editor" hidden>
+      <div id="creative-hud" class="creative-hud">
+        <div class="creative-hud-left">
+          <button class="btn" id="btn-creative-editor-back">← Voltar</button>
+        </div>
+        <div class="creative-hud-mid">
+          <div class="creative-current" id="creative-current-team">TIME ATUAL 🔵 AZUL</div>
+          <div class="creative-spectator" id="creative-spectator" hidden>
+            <div class="spec-item">⏱️ <span id="creative-battle-time">00:00</span></div>
+            <div class="spec-item spec-counts">
+              <span class="spec-blue">🔵 <b id="creative-blue-count">0</b></span>
+              <span class="spec-red">🔴 <b id="creative-red-count">0</b></span>
+            </div>
+            <div class="spec-item spec-hint">Arrastar/WASD · Zoom: roda · Pausa: Esc</div>
+            <div class="spec-item spec-speed">
+              <button class="spec-speed-btn active" data-speed="1">▶ 1x</button>
+              <button class="spec-speed-btn" data-speed="2">▶ 2x</button>
+              <button class="spec-speed-btn" data-speed="4">▶ 4x</button>
+            </div>
+            <button class="btn btn-primary spec-pause" id="btn-creative-pause">⏸ Pausar</button>
+          </div>
+          <div class="creative-seg" id="creative-seg">
+            <button class="team-btn team-btn--blue active" id="creative-team-blue">🔵 AZUL <span id="creative-count-blue">0</span></button>
+            <button class="team-btn team-btn--red" id="creative-team-red">🔴 VERMELHO <span id="creative-count-red">0</span></button>
+          </div>
+          <div class="creative-palette" id="creative-palette">
+            <button class="palette-btn" data-creative-kind="unit" data-creative-type="knight">🪖 Cavaleiro</button>
+            <button class="palette-btn" data-creative-kind="unit" data-creative-type="archer">🏹 Arqueiro</button>
+            <button class="palette-btn" data-creative-kind="unit" data-creative-type="tank">🛡️ Tanque</button>
+            <button class="palette-btn" data-creative-kind="unit" data-creative-type="champion">⭐ Campeão</button>
+            <button class="palette-btn" data-creative-kind="unit" data-creative-type="boss">👑 Boss</button>
+            <span class="palette-sep"></span>
+            <button class="palette-btn" data-creative-kind="structure" data-creative-type="base">🏰 Base</button>
+            <button class="palette-btn" data-creative-kind="structure" data-creative-type="house">🏠 Casa</button>
+            <button class="palette-btn" data-creative-kind="structure" data-creative-type="market">🏪 Mercado</button>
+            <button class="palette-btn" data-creative-kind="structure" data-creative-type="tower">🗼 Torre</button>
+            <button class="palette-btn" data-creative-kind="structure" data-creative-type="wall">⛩️ Muralha</button>
+            <button class="palette-btn" data-creative-kind="structure" data-creative-type="mine">⛏️ Mina</button>
+          </div>
+          <div class="creative-actions">
+            <button class="btn" id="btn-creative-remove">🗑️ Remover</button>
+          </div>
+        </div>
+        <div class="creative-hud-right">
+          <button class="btn btn-primary creative-start" id="btn-creative-start">▶ COMEÇAR BATALHA</button>
+        </div>
+      </div>
+    </div>
+
     <div id="pause" class="screen" hidden>
       <div class="panel">
-        <h2>Pausa</h2>
+        <h2 id="pause-title">Pausa</h2>
         <button class="btn btn-primary" id="btn-resume">Continuar</button>
         <button class="btn" id="btn-pause-controls">Controles</button>
         <button class="btn" id="btn-pause-settings">Configurações</button>
@@ -1133,45 +2618,54 @@
     <div id="settings" class="screen" hidden>
       <div class="panel">
         <h2>Configurações</h2>
-        <div class="setting">
-          <span>Música</span>
-          <input type="checkbox" id="set-music" />
+        <div class="settings-section">
+          <h4>Áudio</h4>
+          <div class="setting">
+            <span>Música</span>
+            <input type="checkbox" id="set-music" />
+          </div>
+          <div class="setting">
+            <span>Efeitos sonoros</span>
+            <input type="checkbox" id="set-sfx" />
+          </div>
+          <div class="setting">
+            <span>Som ambiente</span>
+            <input type="checkbox" id="set-ambient" />
+          </div>
+          <div class="setting">
+            <span>Volume da música</span>
+            <input type="range" id="set-music-vol" min="0" max="100" />
+          </div>
+          <div class="setting">
+            <span>Volume dos efeitos</span>
+            <input type="range" id="set-sfx-vol" min="0" max="100" />
+          </div>
+          <div class="setting">
+            <span>Volume da interface</span>
+            <input type="range" id="set-iface-vol" min="0" max="100" />
+          </div>
+          <div class="setting">
+            <span>Volume do ambiente</span>
+            <input type="range" id="set-amb-vol" min="0" max="100" />
+          </div>
         </div>
-        <div class="setting">
-          <span>Efeitos sonoros</span>
-          <input type="checkbox" id="set-sfx" />
+        <div class="settings-section">
+          <h4>Interface</h4>
+          <div class="setting">
+            <span>Mostrar FPS</span>
+            <input type="checkbox" id="set-fps" />
+          </div>
         </div>
-        <div class="setting">
-          <span>Mostrar FPS</span>
-          <input type="checkbox" id="set-fps" />
-        </div>
-        <div class="setting">
-          <span>Volume da música</span>
-          <input type="range" id="set-music-vol" min="0" max="100" />
-        </div>
-        <div class="setting">
-          <span>Volume dos efeitos</span>
-          <input type="range" id="set-sfx-vol" min="0" max="100" />
-        </div>
-        <div class="setting">
-          <span>Volume da interface</span>
-          <input type="range" id="set-iface-vol" min="0" max="100" />
-        </div>
-        <div class="setting">
-          <span>Som ambiente</span>
-          <input type="checkbox" id="set-ambient" />
-        </div>
-        <div class="setting">
-          <span>Volume do ambiente</span>
-          <input type="range" id="set-amb-vol" min="0" max="100" />
-        </div>
-        <div class="setting">
-          <span>Limite de tropas</span>
-          <select id="set-units">
-            <option value="200">200</option>
-            <option value="500">500</option>
-            <option value="1000">1000</option>
-          </select>
+        <div class="settings-section">
+          <h4>Jogabilidade</h4>
+          <div class="setting">
+            <span>Limite de tropas</span>
+            <select id="set-units">
+              <option value="200">200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+            </select>
+          </div>
         </div>
         <button class="btn btn-primary" id="btn-settings-back">Voltar</button>
       </div>
@@ -1180,23 +2674,46 @@
     <div id="controls" class="screen" hidden>
       <div class="panel">
         <h2>Controles</h2>
-        <table class="controls-table">
-          <tr><td>Selecionar unidade / grupo</td><td><kbd>Clique esquerdo</kbd></td></tr>
-          <tr><td>Selecionar retângulo</td><td><kbd>Arrastar</kbd></td></tr>
-          <tr><td>Mover tropas selecionadas</td><td><kbd>Clique direito</kbd></td></tr>
-          <tr><td>Recrutar cavaleiros</td><td><kbd>E</kbd></td></tr>
-          <tr><td>Recrutar arqueiros</td><td><kbd>F</kbd></td></tr>
-          <tr><td>Recrutar tanques</td><td><kbd>C</kbd></td></tr>
-          <tr><td>Recrutar campeão</td><td><kbd>G</kbd></td></tr>
-          <tr><td>Formação em linha</td><td><kbd>L</kbd></td></tr>
-          <tr><td>Formação em V</td><td><kbd>V</kbd></td></tr>
-          <tr><td>Formação quadrada</td><td><kbd>Q</kbd></td></tr>
-          <tr><td>Formação defensiva</td><td><kbd>B</kbd></td></tr>
-          <tr><td>Começar wave</td><td><kbd>Botão no HUD</kbd></td></tr>
-          <tr><td>Mover câmera</td><td><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></td></tr>
-          <tr><td>Zoom</td><td><kbd>Roda do mouse</kbd></td></tr>
-          <tr><td>Pausar</td><td><kbd>Esc</kbd></td></tr>
-        </table>
+        <div class="controls-group">
+          <h4>Movimento</h4>
+          <table class="controls-table">
+            <tr><td>Mover câmera</td><td><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></td></tr>
+            <tr><td>Zoom</td><td><kbd>Roda do mouse</kbd></td></tr>
+          </table>
+        </div>
+        <div class="controls-group">
+          <h4>Seleção</h4>
+          <table class="controls-table">
+            <tr><td>Selecionar unidade / grupo</td><td><kbd>Clique esquerdo</kbd></td></tr>
+            <tr><td>Selecionar retângulo</td><td><kbd>Arrastar</kbd></td></tr>
+            <tr><td>Mover tropas selecionadas</td><td><kbd>Clique direito</kbd></td></tr>
+          </table>
+        </div>
+        <div class="controls-group">
+          <h4>Tropas</h4>
+          <table class="controls-table">
+            <tr><td>Recrutar cavaleiros</td><td><kbd>E</kbd></td></tr>
+            <tr><td>Recrutar arqueiros</td><td><kbd>F</kbd></td></tr>
+            <tr><td>Recrutar tanques</td><td><kbd>C</kbd></td></tr>
+            <tr><td>Recrutar campeão</td><td><kbd>G</kbd></td></tr>
+          </table>
+        </div>
+        <div class="controls-group">
+          <h4>Formações</h4>
+          <table class="controls-table">
+            <tr><td>Formação em linha</td><td><kbd>L</kbd></td></tr>
+            <tr><td>Formação em V</td><td><kbd>V</kbd></td></tr>
+            <tr><td>Formação quadrada</td><td><kbd>Q</kbd></td></tr>
+            <tr><td>Formação defensiva</td><td><kbd>B</kbd></td></tr>
+          </table>
+        </div>
+        <div class="controls-group">
+          <h4>Geral</h4>
+          <table class="controls-table">
+            <tr><td>Começar wave</td><td><kbd>Botão no HUD</kbd></td></tr>
+            <tr><td>Pausar</td><td><kbd>Esc</kbd></td></tr>
+          </table>
+        </div>
         <button class="btn btn-primary" id="btn-controls-back">Voltar</button>
       </div>
     </div>
@@ -1212,12 +2729,19 @@
       </div>
     </div>
 
-    <div id="storyselect" class="screen" hidden>
+    <div id="storyselect" class="screen screen--backdrop" hidden>
       <div class="panel">
         <h2>História</h2>
         <p class="modes-hint">Conclua uma fase para desbloquear a próxima.</p>
         <div class="campaign-banner" id="campaignBanner" hidden>
           🏆 <strong>Campanha concluída!</strong> O Senhor da Ruína foi derrotado.
+        </div>
+        <div class="campaign-progress-wrap" id="campaignProgressWrap">
+          <div class="campaign-progress-head">
+            <span><b id="campaignProgressText">0 de 10</b> fases concluídas</span>
+            <span class="campaign-stars" id="campaignProgressStars">★ 0 / 30</span>
+          </div>
+          <div class="campaign-bar"><div class="campaign-fill" id="campaignProgressFill"></div></div>
         </div>
         <div class="story-grid" id="storyGrid"></div>
         <button class="btn" id="btn-story-back">Voltar</button>
@@ -1235,9 +2759,13 @@
 
     <div id="storywin" class="screen" hidden>
       <div class="panel">
-        <h2 id="storyWinTitle">Fase Concluída</h2>
+        <h2 class="result-title" id="storyWinTitle">Fase Concluída</h2>
+        <p class="result-subtitle" id="storyWinSubtitle"></p>
         <div class="result-stars" id="storyWinStars"></div>
-        <ul class="checklist" id="storyWinText"></ul>
+        <h3 class="result-section-title">Objetivo</h3>
+        <p class="result-objective" id="storyWinObjective"></p>
+        <h3 class="result-section-title">Estatísticas</h3>
+        <div class="result-grid" id="storyWinStats"></div>
         <p class="story-win-unlock" id="storyWinUnlock" hidden></p>
         <button class="btn btn-primary" id="btn-story-win-continue">Continuar</button>
         <button class="btn" id="btn-story-win-retry">Repetir fase</button>
@@ -1269,10 +2797,56 @@
 
     <div id="storylose" class="screen" hidden>
       <div class="panel">
-        <h2 class="gameover-title">Derrota</h2>
-        <p class="gameover-text" id="storyLoseText"></p>
+        <h2 class="gameover-title">Missão Falhou</h2>
+        <p class="lose-subtitle" id="storyLoseText"></p>
+        <div class="result-grid" id="storyLoseStats"></div>
+        <p class="lose-encourage">Não desista. Reorganize suas tropas e tente novamente.</p>
         <button class="btn btn-primary" id="btn-story-lose-retry">Tentar novamente</button>
         <button class="btn" id="btn-story-lose-menu">Menu principal</button>
+      </div>
+    </div>
+
+    <div id="advwin" class="screen" hidden>
+      <div class="panel">
+        <h2 class="result-title" id="advWinTitle">Vitória</h2>
+        <p class="result-subtitle" id="advWinSubtitle"></p>
+        <h3 class="result-section-title">Estatísticas</h3>
+        <div class="result-grid" id="advWinStats"></div>
+        <button class="btn btn-primary" id="btn-adv-win-continue">Continuar</button>
+        <button class="btn" id="btn-adv-win-restart">Jogar novamente</button>
+        <button class="btn" id="btn-adv-win-menu">Menu principal</button>
+      </div>
+    </div>
+
+    <div id="advlose" class="screen" hidden>
+      <div class="panel">
+        <h2 class="gameover-title" id="advLoseTitle">Derrota</h2>
+        <p class="lose-subtitle" id="advLoseText"></p>
+        <div class="result-grid" id="advLoseStats"></div>
+        <p class="lose-encourage">Explore a névoa com cuidado e reúna mais ouro antes de atacar.</p>
+        <button class="btn btn-primary" id="btn-adv-lose-retry">Tentar novamente</button>
+        <button class="btn" id="btn-adv-lose-continent">Mapa do continente</button>
+        <button class="btn" id="btn-adv-lose-menu">Menu principal</button>
+      </div>
+    </div>
+
+    <div id="creativresult" class="screen" hidden>
+      <div class="panel">
+        <h2 class="result-title" id="creativeResultTitle">⚔️ BATALHA FINALIZADA</h2>
+        <p class="result-subtitle" id="creativeResultWinner">🔵 AZUL VENCEU</p>
+        <h3 class="result-section-title">Estatísticas</h3>
+        <div class="result-grid">
+          <div class="cell"><span>Tempo</span><b id="creativeResultTime">00:00</b></div>
+          <div class="cell"><span>🔵 Tropas restantes</span><b id="creativeResultBlueTroops">0</b></div>
+          <div class="cell"><span>🔴 Tropas restantes</span><b id="creativeResultRedTroops">0</b></div>
+          <div class="cell"><span>🔵 Perdas</span><b id="creativeResultBlueLosses">0</b></div>
+          <div class="cell"><span>🔴 Perdas</span><b id="creativeResultRedLosses">0</b></div>
+          <div class="cell"><span>🔵 Inimigos derrotados</span><b id="creativeResultBlueKills">0</b></div>
+          <div class="cell"><span>🔴 Inimigos derrotados</span><b id="creativeResultRedKills">0</b></div>
+        </div>
+        <button class="btn btn-primary" id="btn-creative-retry">Tentar novamente</button>
+        <button class="btn" id="btn-creative-edit">Editar cenário</button>
+        <button class="btn" id="btn-creative-result-menu">Menu principal</button>
       </div>
     </div>
 

@@ -3,6 +3,7 @@ import type { SpatialGrid } from '../core/grid';
 import { clamp } from '../core/vector';
 import { getSquadFor, getEnemyFormationState } from '../formation/auto-formation';
 import type { Squad } from '../formation/auto-formation';
+import { distToWall } from '../entities/structures';
 import type { Unit } from '../entities/unit';
 import type { Structure } from '../entities/structures';
 
@@ -16,14 +17,26 @@ interface FormCtx {
 
 const neighbors: Unit[] = [];
 
-export function updateUnits(units: Unit[], grid: SpatialGrid, structures: Structure[], dt: number): void {
+export function updateUnits(
+  units: Unit[],
+  grid: SpatialGrid,
+  structures: Structure[],
+  dt: number,
+  worldW: number = CONFIG.world.width,
+  worldH: number = CONFIG.world.height,
+): void {
   const sepRadius = CONFIG.separation.radius;
   const walls = structures.filter((s) => s.alive && s.kind === 'wall');
+  const blockers = structures.filter((s) => s.alive && s.playerBuilt);
   for (const u of units) {
     if (!u.alive) continue;
     let vx = 0;
     let vy = 0;
-    if (u.team === 'player' && u.moveTarget) {
+    if (u.aiControl) {
+      const v = aiSteer(u);
+      vx += v.x;
+      vy += v.y;
+    } else if (u.team === 'player' && u.moveTarget) {
       // explicit player command always wins
       const dx = u.moveTarget.x - u.x;
       const dy = u.moveTarget.y - u.y;
@@ -132,9 +145,22 @@ export function updateUnits(units: Unit[], grid: SpatialGrid, structures: Struct
     for (const w of walls) {
       if (hitWall(u.x, ny, u.radius, w)) ny = u.y;
     }
+    for (let iter = 0; iter < 2; iter++) {
+      for (const b of blockers) {
+        const dx = nx - b.x;
+        const dy = ny - b.y;
+        const d = Math.hypot(dx, dy);
+        const minD = b.radius + u.radius;
+        if (d >= minD) continue;
+        const dirX = d > 0.5 ? dx / d : 1;
+        const dirY = d > 0.5 ? dy / d : 0;
+        nx = b.x + dirX * minD;
+        ny = b.y + dirY * minD;
+      }
+    }
 
-    u.x = clamp(nx, u.radius, CONFIG.world.width - u.radius);
-    u.y = clamp(ny, u.radius, CONFIG.world.height - u.radius);
+    u.x = clamp(nx, u.radius, worldW - u.radius);
+    u.y = clamp(ny, u.radius, worldH - u.radius);
   }
 }
 
@@ -246,4 +272,48 @@ function inAttackRange(u: Unit, target: Unit): boolean {
   const dx = target.x - u.x;
   const dy = target.y - u.y;
   return dx * dx + dy * dy <= u.attackRange * u.attackRange;
+}
+
+function inStructureRange(u: Unit, s: Structure): boolean {
+  if (s.kind === 'wall') return distToWall(s, u.x, u.y) <= u.attackRange + 4;
+  const dx = s.x - u.x;
+  const dy = s.y - u.y;
+  const range = u.attackRange + s.radius;
+  return dx * dx + dy * dy <= range * range;
+}
+
+function aiSteer(u: Unit): { x: number; y: number } {
+  if (u.troopType === 'boss') {
+    const ab = u.ability;
+    if (ab && ab.phase !== 'idle') return { x: 0, y: 0 };
+  }
+  const target = u.attackTarget && u.attackTarget.alive ? u.attackTarget : null;
+  if (target) {
+    if (u.troopType === 'archer') {
+      const dx = target.x - u.x;
+      const dy = target.y - u.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 0.0001 && d < u.attackRange * 0.5) {
+        const back = { x: u.x - (dx / d) * 80, y: u.y - (dy / d) * 80 };
+        return steerTo(u, back, 1);
+      }
+    }
+    if (inAttackRange(u, target)) return { x: 0, y: 0 };
+    return steerTo(u, target, 1);
+  }
+  if (u.structureTarget && u.structureTarget.alive) {
+    if (u.structureTarget.kind === 'wall') {
+      if (distToWall(u.structureTarget, u.x, u.y) <= u.attackRange + 4) return { x: 0, y: 0 };
+      return steerTo(u, u.structureTarget, 1);
+    }
+    if (inStructureRange(u, u.structureTarget)) return { x: 0, y: 0 };
+    return ringAround(u, u.structureTarget);
+  }
+  if (u.moveTarget) {
+    const dx = u.moveTarget.x - u.x;
+    const dy = u.moveTarget.y - u.y;
+    if (dx * dx + dy * dy < 36) return { x: 0, y: 0 };
+    return steerTo(u, u.moveTarget, 1);
+  }
+  return { x: 0, y: 0 };
 }

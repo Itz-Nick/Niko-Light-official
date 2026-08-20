@@ -29,12 +29,15 @@ export interface Unit {
   flankPoint: { x: number; y: number } | null;
   formationOffset: { x: number; y: number } | null;
   formationSlot: { x: number; y: number } | null;
+  defendPoint: { x: number; y: number } | null;
   attackTarget: Unit | null;
   structureTarget: Structure | null;
   thinkTimer: number;
   flashTimer: number;
   ability: BossAbility | null;
   alive: boolean;
+  creativeId?: number;
+  aiControl?: boolean;
 }
 
 let nextUnitId = 1;
@@ -183,13 +186,14 @@ export function createUnit(
     searchRadius: s.searchRadius,
     radius: s.radius,
     color: s.color,
-    defense: mods?.defense ?? 0,
+    defense: (mods?.defense ?? 0) + (scale?.defense ?? 0),
     moveTarget: null,
     advanceTarget: null,
     advanceOffset: null,
     flankPoint: null,
     formationOffset: null,
     formationSlot: null,
+    defendPoint: null,
     attackTarget: null,
     structureTarget: null,
     thinkTimer: Math.random() * 0.25,
