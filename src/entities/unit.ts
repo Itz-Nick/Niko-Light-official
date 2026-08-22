@@ -34,6 +34,7 @@ export interface Unit {
   structureTarget: Structure | null;
   thinkTimer: number;
   flashTimer: number;
+  attackPhase: number;
   ability: BossAbility | null;
   alive: boolean;
   creativeId?: number;
@@ -198,6 +199,7 @@ export function createUnit(
     structureTarget: null,
     thinkTimer: Math.random() * 0.25,
     flashTimer: 0,
+    attackPhase: 0,
     ability: troopType === 'boss' ? createBossAbility() : null,
     alive: true,
   };

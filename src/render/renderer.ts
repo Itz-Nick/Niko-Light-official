@@ -5,6 +5,7 @@ import { CONFIG } from '../config';
 import type { Projectile } from '../combat/projectile';
 import type { Structure } from '../entities/structures';
 import type { Unit } from '../entities/unit';
+import { drawEffects } from '../effects';
 import type { AdventureRenderData } from '../adventure/adventure';
 import {
   CONTINENT_BACK_BUTTON,
@@ -74,6 +75,217 @@ export interface CreativeEditorView {
   ghost: CreativeGhost | null;
   selected: CreativeSelected | null;
   flash?: number;
+}
+
+export interface StoryMapNode {
+  number: number;
+  x: number;
+  y: number;
+  name: string;
+  description: string;
+  objective: string;
+  biome: string;
+  stars: number;
+  state: 'locked' | 'available' | 'completed';
+  icon: string;
+}
+
+export interface StoryMapChapter {
+  range: [number, number];
+  label: string;
+  color: string;
+  bgColor: string;
+}
+
+export interface StoryMapView {
+  nodes: StoryMapNode[];
+  hoveredNode: number | null;
+  campaignComplete: boolean;
+  totalStars: number;
+  completedCount: number;
+  time: number;
+  camera: StoryMapCamera;
+}
+
+export class StoryMapCamera {
+  x: number;
+  y: number;
+  zoom: number;
+  private targetX: number;
+  private targetY: number;
+  private targetZoom: number;
+  private viewWidth: number;
+  private viewHeight: number;
+  private mapW: number;
+  private mapH: number;
+  private minZoom: number;
+  private maxZoom: number;
+  private safeTop = 90;
+  private safeBottom = 90;
+  private safeLeft = 20;
+  private safeRight = 20;
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private dragStartCamX = 0;
+  private dragStartCamY = 0;
+  private isDragging = false;
+
+  constructor(viewWidth: number, viewHeight: number, mapW: number, mapH: number) {
+    this.viewWidth = viewWidth;
+    this.viewHeight = viewHeight;
+    this.mapW = mapW;
+    this.mapH = mapH;
+    this.minZoom = 0.5;
+    this.maxZoom = 2.0;
+    this.x = mapW / 2;
+    this.y = mapH / 2;
+    this.zoom = 1.0;
+    this.targetX = this.x;
+    this.targetY = this.y;
+    this.targetZoom = this.zoom;
+  }
+
+  setViewSize(width: number, height: number): void {
+    this.viewWidth = width;
+    this.viewHeight = height;
+  }
+
+  setMapSize(mapW: number, mapH: number): void {
+    this.mapW = mapW;
+    this.mapH = mapH;
+    this.clampPosition();
+  }
+
+  setSafeArea(top: number, bottom: number, left: number, right: number): void {
+    this.safeTop = top;
+    this.safeBottom = bottom;
+    this.safeLeft = left;
+    this.safeRight = right;
+  }
+
+  // Clamp a value to the range [a, b] regardless of ordering
+  private clampRange(v: number, a: number, b: number): number {
+    return Math.max(Math.min(a, b), Math.min(Math.max(a, b), v));
+  }
+
+  // Keep the camera such that the map edges stay within the safe screen region.
+  private clampPosition(): void {
+    const zoom = this.zoom;
+    const xTop = (this.viewWidth / 2 - this.safeLeft) / zoom;
+    const xBottom = this.mapW - (this.viewWidth / 2 - this.safeRight) / zoom;
+    const yTop = (this.viewHeight / 2 - this.safeTop) / zoom;
+    const yBottom = this.mapH - (this.viewHeight / 2 - this.safeBottom) / zoom;
+    this.x = this.clampRange(this.x, xTop, xBottom);
+    this.y = this.clampRange(this.y, yTop, yBottom);
+  }
+
+  setTargetPosition(x: number, y: number): void {
+    this.targetX = x;
+    this.targetY = y;
+    const zoom = this.zoom;
+    const xTop = (this.viewWidth / 2 - this.safeLeft) / zoom;
+    const xBottom = this.mapW - (this.viewWidth / 2 - this.safeRight) / zoom;
+    const yTop = (this.viewHeight / 2 - this.safeTop) / zoom;
+    const yBottom = this.mapH - (this.viewHeight / 2 - this.safeBottom) / zoom;
+    this.targetX = this.clampRange(this.targetX, xTop, xBottom);
+    this.targetY = this.clampRange(this.targetY, yTop, yBottom);
+  }
+
+  setTargetZoom(zoom: number, sx?: number, sy?: number): void {
+    const newZoom = Math.max(this.minZoom, Math.min(this.maxZoom, zoom));
+    if (sx !== undefined && sy !== undefined) {
+      const before = this.screenToWorld(sx, sy);
+      this.targetZoom = newZoom;
+      const after = this.screenToWorld(sx, sy);
+      this.targetX += before.x - after.x;
+      this.targetY += before.y - after.y;
+    } else {
+      this.targetZoom = newZoom;
+    }
+    this.clampTarget();
+  }
+
+  private clampTarget(): void {
+    const zoom = this.targetZoom;
+    const xTop = (this.viewWidth / 2 - this.safeLeft) / zoom;
+    const xBottom = this.mapW - (this.viewWidth / 2 - this.safeRight) / zoom;
+    const yTop = (this.viewHeight / 2 - this.safeTop) / zoom;
+    const yBottom = this.mapH - (this.viewHeight / 2 - this.safeBottom) / zoom;
+    this.targetX = this.clampRange(this.targetX, xTop, xBottom);
+    this.targetY = this.clampRange(this.targetY, yTop, yBottom);
+  }
+
+  zoomAt(sx: number, sy: number, factor: number): void {
+    this.setTargetZoom(this.zoom * factor, sx, sy);
+  }
+
+  move(dx: number, dy: number): void {
+    this.setTargetPosition(this.x + dx / this.zoom, this.y + dy / this.zoom);
+  }
+
+  startDrag(sx: number, sy: number): void {
+    this.isDragging = true;
+    this.dragStartX = sx;
+    this.dragStartY = sy;
+    this.dragStartCamX = this.x;
+    this.dragStartCamY = this.y;
+  }
+
+  drag(sx: number, sy: number): void {
+    if (!this.isDragging) return;
+    const dx = (this.dragStartX - sx) / this.zoom;
+    const dy = (this.dragStartY - sy) / this.zoom;
+    this.setTargetPosition(this.dragStartCamX + dx, this.dragStartCamY + dy);
+  }
+
+  endDrag(): void {
+    this.isDragging = false;
+  }
+
+  update(dt: number): void {
+    const lerp = 1 - Math.pow(0.001, dt);
+    this.x += (this.targetX - this.x) * lerp;
+    this.y += (this.targetY - this.y) * lerp;
+    this.zoom += (this.targetZoom - this.zoom) * lerp;
+    this.clampPosition();
+  }
+
+  // Instantly set position and zoom (for initial framing / reframe button)
+  setPositionAndZoom(x: number, y: number, zoom: number): void {
+    this.x = x;
+    this.y = y;
+    this.zoom = zoom;
+    this.targetX = x;
+    this.targetY = y;
+    this.targetZoom = zoom;
+    this.clampPosition();
+  }
+
+  screenToWorld(sx: number, sy: number): { x: number; y: number } {
+    return {
+      x: (sx - this.viewWidth / 2) / this.zoom + this.x,
+      y: (sy - this.viewHeight / 2) / this.zoom + this.y,
+    };
+  }
+
+  worldToScreen(wx: number, wy: number): { x: number; y: number } {
+    return {
+      x: (wx - this.x) * this.zoom + this.viewWidth / 2,
+      y: (wy - this.y) * this.zoom + this.viewHeight / 2,
+    };
+  }
+
+  focusOn(wx: number, wy: number): void {
+    this.setTargetPosition(wx, wy);
+  }
+
+  isDraggingActive(): boolean {
+    return this.isDragging;
+  }
+
+  getZoom(): number {
+    return this.zoom;
+  }
 }
 
 export type MenuVariant = 'menu' | 'modes' | 'story' | 'creative';
@@ -151,6 +363,35 @@ const CONTINENT_ROAD: { x: number; y: number }[] = [
 ];
 
 const ROAD_INDEX: Record<number, number> = { 1: 0, 2: 3, 3: 5 };
+
+export const STORY_MAP_DESIGN_W = 1200;
+export const STORY_MAP_DESIGN_H = 900;
+
+export const STORY_MAP_PATH: { x: number; y: number }[] = [
+  { x: 180, y: 720 },
+  { x: 280, y: 580 },
+  { x: 420, y: 480 },
+  { x: 560, y: 360 },
+  { x: 700, y: 280 },
+  { x: 840, y: 380 },
+  { x: 960, y: 260 },
+  { x: 980, y: 130 },
+  { x: 860, y: 100 },
+  { x: 740, y: 140 },
+];
+
+export const STORY_MAP_NODE_ICONS: Record<number, string> = {
+  1: '🛡️',
+  2: '🏰',
+  3: '🏹',
+  4: '⚔️',
+  5: '🛡️',
+  6: '🗡️',
+  7: '⛏️',
+  8: '🏰',
+  9: '🪖',
+  10: '👑',
+};
 
 const BG_SCALE = 0.2;
 const HUE_CYCLE: readonly number[] = [355, 25, 46, 355, 285, 355];
@@ -322,6 +563,7 @@ export class Renderer {
     this.drawCart(cart);
     this.drawUnits(camera, units, selected);
     this.drawProjectiles(projectiles);
+    drawEffects(ctx);
     this.drawMarkers(markers);
     this.drawSelectionGroup(selected);
     if (buildPreview) this.drawBuildPreview(buildPreview);
@@ -1159,6 +1401,558 @@ export class Renderer {
     ctx.fillText('ESC', rect.x + rect.w - 32, rect.y + rect.h / 2 + 1);
   }
 
+  renderStoryMap(dt: number, view: StoryMapView): void {
+    this.storyMapTime += dt;
+    const { ctx } = this;
+    const w = this.width;
+    const h = this.height;
+    const camera = view.camera;
+
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+
+    const darkBg = ctx.createLinearGradient(0, 0, 0, h);
+    darkBg.addColorStop(0, '#0a1218');
+    darkBg.addColorStop(0.5, '#0d1a22');
+    darkBg.addColorStop(1, '#081016');
+    ctx.fillStyle = darkBg;
+    ctx.fillRect(0, 0, w, h);
+
+    if (!camera) return;
+
+    // Apply camera transform: translate to camera position, then scale
+    const camX = camera.x;
+    const camY = camera.y;
+    const zoom = camera.zoom;
+
+    ctx.save();
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-camX, -camY);
+
+    // Draw background
+    this.ensureStoryMapBg();
+    if (this.storyMapBg) {
+      ctx.drawImage(this.storyMapBg, 0, 0, STORY_MAP_DESIGN_W, STORY_MAP_DESIGN_H);
+    }
+
+    const t = this.storyMapTime;
+
+    // Draw path
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < STORY_MAP_PATH.length - 1; i++) {
+      const p1 = STORY_MAP_PATH[i];
+      const p2 = STORY_MAP_PATH[i + 1];
+      const node1 = view.nodes.find(n => n.number === i + 1);
+      const node2 = view.nodes.find(n => n.number === i + 2);
+      const bothAvailable = node1 && node2 && (node1.state !== 'locked' || node2.state !== 'locked');
+
+      const grad = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
+      if (bothAvailable) {
+        grad.addColorStop(0, 'rgba(255, 209, 102, 0.15)');
+        grad.addColorStop(0.5, 'rgba(255, 209, 102, 0.08)');
+        grad.addColorStop(1, 'rgba(255, 209, 102, 0.15)');
+      } else {
+        grad.addColorStop(0, 'rgba(90, 90, 100, 0.12)');
+        grad.addColorStop(1, 'rgba(90, 90, 100, 0.06)');
+      }
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+
+      if (bothAvailable) {
+        const pulse = 0.5 + 0.5 * Math.sin(t * 2 + i);
+        ctx.strokeStyle = `rgba(255, 209, 102, ${0.25 + 0.15 * pulse})`;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([8, 12]);
+        ctx.lineDashOffset = -t * 20;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+    ctx.restore();
+
+    // Draw chapter region glows
+    const chapterColors = [
+      { range: [1, 3], color: 'rgba(90, 180, 220, 0.1)' },
+      { range: [4, 6], color: 'rgba(255, 209, 102, 0.1)' },
+      { range: [7, 9], color: 'rgba(255, 143, 163, 0.1)' },
+      { range: [10, 10], color: 'rgba(255, 70, 85, 0.15)' },
+    ];
+
+    for (const ch of chapterColors) {
+      const nodesInChapter = view.nodes.filter(n => n.number >= ch.range[0] && n.number <= ch.range[1]);
+      if (nodesInChapter.length === 0) continue;
+      const minX = Math.min(...nodesInChapter.map(n => n.x));
+      const maxX = Math.max(...nodesInChapter.map(n => n.x));
+      const minY = Math.min(...nodesInChapter.map(n => n.y));
+      const maxY = Math.max(...nodesInChapter.map(n => n.y));
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      const rx = (maxX - minX) * 0.5 + 120;
+      const ry = (maxY - minY) * 0.5 + 80;
+
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(rx, ry));
+      g.addColorStop(0, ch.color);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw nodes
+    for (const node of view.nodes) {
+      const nx = node.x;
+      const ny = node.y;
+      const isHovered = view.hoveredNode === node.number;
+      const isAvailable = node.state === 'available';
+      const isCompleted = node.state === 'completed';
+
+      const pulse = 0.5 + 0.5 * Math.sin(t * 2.5 + node.number);
+      const baseRadius = 28;
+      const hoverScale = isHovered ? 1.15 : 1;
+
+      if (isCompleted) {
+        const g = ctx.createRadialGradient(nx, ny, 0, nx, ny, baseRadius * 1.8);
+        g.addColorStop(0, 'rgba(61, 220, 132, 0.25)');
+        g.addColorStop(1, 'rgba(61, 220, 132, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(nx, ny, baseRadius * 1.8 * hoverScale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (isAvailable && !isCompleted) {
+        const g = ctx.createRadialGradient(nx, ny, 0, nx, ny, baseRadius * 1.5);
+        g.addColorStop(0, `rgba(255, 209, 102, ${0.3 + 0.15 * pulse})`);
+        g.addColorStop(1, 'rgba(255, 209, 102, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(nx, ny, baseRadius * 1.5 * hoverScale, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = `rgba(255, 209, 102, ${0.5 + 0.3 * pulse})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(nx, ny, baseRadius * (0.9 + 0.2 * pulse) * hoverScale, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      if (node.state === 'locked') {
+        ctx.fillStyle = 'rgba(40, 40, 50, 0.8)';
+      } else if (isCompleted) {
+        ctx.fillStyle = 'rgba(30, 60, 40, 0.9)';
+      } else {
+        ctx.fillStyle = 'rgba(60, 50, 30, 0.9)';
+      }
+      ctx.beginPath();
+      ctx.arc(nx, ny, baseRadius * hoverScale, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (isCompleted) {
+        ctx.strokeStyle = 'rgba(61, 220, 132, 0.8)';
+      } else if (isAvailable) {
+        ctx.strokeStyle = `rgba(255, 209, 102, ${0.7 + 0.2 * pulse})`;
+      } else {
+        ctx.strokeStyle = 'rgba(90, 90, 100, 0.4)';
+      }
+      ctx.lineWidth = isHovered ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(nx, ny, baseRadius * hoverScale, 0, Math.PI * 2);
+      ctx.stroke();
+
+      if (node.number === 10) {
+        ctx.strokeStyle = `rgba(255, 70, 85, ${0.6 + 0.3 * Math.sin(t * 3)})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(nx, ny, baseRadius * 1.3 * hoverScale, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const iconSize = Math.max(16, Math.round(24 * hoverScale));
+      ctx.font = `${iconSize}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+      if (node.state === 'locked') {
+        ctx.fillStyle = 'rgba(150, 150, 160, 0.7)';
+      } else if (isCompleted) {
+        ctx.fillStyle = '#3ddc84';
+      } else if (isAvailable) {
+        ctx.fillStyle = '#ffd166';
+      } else {
+        ctx.fillStyle = '#ffd166';
+      }
+      ctx.fillText(node.icon, nx, ny - 2);
+
+      if (node.number === 10) {
+        ctx.fillStyle = `rgba(255, 70, 85, ${0.8 + 0.2 * Math.sin(t * 4)})`;
+        ctx.font = `${Math.max(10, Math.round(14))}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+        ctx.fillText('👑', nx, ny + baseRadius * hoverScale - 10);
+      }
+
+      if (isCompleted) {
+        ctx.fillStyle = '#3ddc84';
+        ctx.font = `bold ${Math.max(9, Math.round(11))}px "Segoe UI", sans-serif`;
+        ctx.fillText('✓', nx + baseRadius * 0.5 * hoverScale, ny - baseRadius * 0.5 * hoverScale);
+
+        const stars = '⭐'.repeat(Math.min(3, Math.max(0, node.stars)));
+        if (stars) {
+          ctx.font = `${Math.max(8, Math.round(10))}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+          ctx.fillText(stars, nx, ny + baseRadius * 0.9 * hoverScale);
+        }
+      } else if (isAvailable) {
+        const stars = '⭐'.repeat(Math.min(3, Math.max(0, node.stars)));
+        if (stars) {
+          ctx.font = `${Math.max(8, Math.round(10))}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+          ctx.fillText(stars, nx, ny + baseRadius * 0.9 * hoverScale);
+        }
+      } else if (node.state === 'locked') {
+        ctx.fillStyle = 'rgba(150, 150, 160, 0.8)';
+        ctx.font = `${Math.max(10, Math.round(14))}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+        ctx.fillText('🔒', nx, ny);
+      }
+    }
+
+    ctx.restore(); // Restore camera transform
+
+    // Now draw UI elements in screen space (no camera transform)
+    this.drawStoryMapUI(ctx, view, w, h, camera);
+  }
+
+  private drawStoryMapTooltip(node: StoryMapNode, nx: number, ny: number, _offsetX: number, _offsetY: number, scale: number, w: number, _h: number): void {
+    const { ctx } = this;
+    const tooltipW = Math.min(280, w * 0.35);
+    const tooltipH = 140;
+    let tx = nx + 50 * scale;
+    let ty = ny - tooltipH - 20 * scale;
+    if (tx + tooltipW > w - 20) tx = nx - tooltipW - 50 * scale;
+    if (ty < 80) ty = ny + 50 * scale;
+
+    const g = ctx.createLinearGradient(tx, ty, tx, ty + tooltipH);
+    g.addColorStop(0, 'rgba(10, 14, 20, 0.98)');
+    g.addColorStop(1, 'rgba(6, 9, 14, 0.95)');
+    ctx.fillStyle = g;
+    roundRectPath(ctx, tx, ty, tooltipW, tooltipH, 12);
+    ctx.fill();
+    ctx.strokeStyle = node.state === 'completed' ? 'rgba(61, 220, 132, 0.5)' : node.state === 'available' ? 'rgba(255, 209, 102, 0.5)' : 'rgba(90, 90, 100, 0.3)';
+    ctx.lineWidth = 1.5;
+    roundRectPath(ctx, tx + 0.5, ty + 0.5, tooltipW - 1, tooltipH - 1, 12);
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    let ly = ty + 24;
+    ctx.font = `bold ${Math.max(12, Math.round(16 * scale))}px "Segoe UI", sans-serif`;
+    ctx.fillStyle = node.state === 'completed' ? '#3ddc84' : node.state === 'available' ? '#ffd166' : '#9fb0c0';
+    ctx.fillText(`${node.icon} FASE ${node.number}: ${node.name}`, tx + 16, ly);
+
+    ly += 24;
+    ctx.font = `${Math.max(11, Math.round(13 * scale))}px "Segoe UI", sans-serif`;
+    ctx.fillStyle = '#c8d8e8';
+    ctx.fillText(node.description, tx + 16, ly);
+
+    ly += 22;
+    const starsFilled = '⭐'.repeat(Math.min(3, Math.max(0, node.stars)));
+    const starsEmpty = '⭐'.repeat(3 - node.stars);
+    ctx.font = `${Math.max(11, Math.round(14 * scale))}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+    ctx.fillStyle = '#ffd166';
+    ctx.fillText(`${starsFilled}${starsEmpty}`, tx + 16, ly);
+
+    if (node.state === 'available' || node.state === 'completed') {
+      ly += 24;
+      const g2 = ctx.createLinearGradient(tx, ly, tx + 100, ly);
+      g2.addColorStop(0, 'rgba(56, 182, 255, 0.2)');
+      g2.addColorStop(1, 'rgba(56, 182, 255, 0)');
+      ctx.fillStyle = g2;
+      roundRectPath(ctx, tx + 16, ly - 18, tooltipW - 32, 28, 6);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(56, 182, 255, 0.4)';
+      ctx.lineWidth = 1;
+      roundRectPath(ctx, tx + 16, ly - 18, tooltipW - 32, 28, 6);
+      ctx.stroke();
+      ctx.font = `bold ${Math.max(11, Math.round(13 * scale))}px "Segoe UI", sans-serif`;
+      ctx.fillStyle = '#6ec8ff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('CLIQUE PARA JOGAR', tx + tooltipW / 2, ly - 4);
+    } else if (node.state === 'locked') {
+      ly += 24;
+      ctx.font = `${Math.max(11, Math.round(13 * scale))}px "Segoe UI", sans-serif`;
+      ctx.fillStyle = 'rgba(150, 150, 160, 0.7)';
+      ctx.textAlign = 'left';
+      ctx.fillText('🔒 Bloqueada — conclua a fase anterior', tx + 16, ly);
+    }
+  }
+
+  private drawStoryMapUI(ctx: CanvasRenderingContext2D, view: StoryMapView, w: number, h: number, _camera: StoryMapCamera): void {
+
+    // Campaign complete panel - positioned below title/progress
+    if (view.campaignComplete) {
+      const panelY = 80;
+      const panelH = 50;
+      const cx = w / 2;
+      const g = ctx.createLinearGradient(0, 0, 0, panelH);
+      g.addColorStop(0, 'rgba(10, 14, 20, 0.95)');
+      g.addColorStop(1, 'rgba(10, 14, 20, 0.7)');
+      ctx.fillStyle = g;
+      roundRectPath(ctx, cx - 220, panelY, 440, panelH, 12);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(61, 220, 132, 0.5)';
+      ctx.lineWidth = 2;
+      roundRectPath(ctx, cx - 220, panelY, 440, panelH, 12);
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 18px "Segoe UI", sans-serif';
+      ctx.fillStyle = '#3ddc84';
+      ctx.shadowColor = 'rgba(61, 220, 132, 0.5)';
+      ctx.shadowBlur = 10;
+      ctx.fillText('🏆 CAMPANHA CONCLUÍDA', cx, panelY + panelH / 2);
+      ctx.shadowBlur = 0;
+    }
+
+    // Back button
+    const backRect = { x: 20, y: h - 70, w: 120, h: 50 };
+    const backHovered = view.hoveredNode === -1;
+    ctx.fillStyle = backHovered ? 'rgba(56, 182, 255, 0.2)' : 'rgba(44, 74, 92, 0.55)';
+    roundRectPath(ctx, backRect.x, backRect.y, backRect.w, backRect.h, 9);
+    ctx.fill();
+    ctx.strokeStyle = backHovered ? 'rgba(56, 182, 255, 0.6)' : 'rgba(110, 200, 255, 0.35)';
+    ctx.lineWidth = 1.2;
+    roundRectPath(ctx, backRect.x + 0.5, backRect.y + 0.5, backRect.w - 1, backRect.h - 1, 9);
+    ctx.stroke();
+    ctx.font = 'bold 14px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = backHovered ? '#6ec8ff' : '#d7e9f5';
+    ctx.fillText('← VOLTAR', backRect.x + backRect.w / 2, backRect.y + backRect.h / 2 + 1);
+    ctx.font = '11px "Segoe UI", sans-serif';
+    ctx.fillStyle = 'rgba(159, 176, 192, 0.8)';
+    ctx.fillText('ESC', backRect.x + backRect.w - 32, backRect.y + backRect.h / 2 + 1);
+
+    // Reframe button
+    const reframeRect = { x: backRect.x + backRect.w + 10, y: h - 70, w: 50, h: 50 };
+    const reframeHovered = view.hoveredNode === -2;
+    ctx.fillStyle = reframeHovered ? 'rgba(255, 209, 102, 0.2)' : 'rgba(44, 74, 92, 0.55)';
+    roundRectPath(ctx, reframeRect.x, reframeRect.y, reframeRect.w, reframeRect.h, 9);
+    ctx.fill();
+    ctx.strokeStyle = reframeHovered ? 'rgba(255, 209, 102, 0.6)' : 'rgba(110, 200, 255, 0.35)';
+    ctx.lineWidth = 1.2;
+    roundRectPath(ctx, reframeRect.x + 0.5, reframeRect.y + 0.5, reframeRect.w - 1, reframeRect.h - 1, 9);
+    ctx.stroke();
+    ctx.font = '20px "Segoe UI Emoji", "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = reframeHovered ? '#ffd166' : '#d7e9f5';
+    ctx.fillText('🎯', reframeRect.x + reframeRect.w / 2, reframeRect.y + reframeRect.h / 2 + 1);
+    ctx.font = '9px "Segoe UI", sans-serif';
+    ctx.fillStyle = 'rgba(159, 176, 192, 0.8)';
+    ctx.fillText('R', reframeRect.x + reframeRect.w - 12, reframeRect.y + reframeRect.h - 8);
+
+    // Title and progress - always at top
+    const storyTitleY = 40;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = 'bold 26px "Segoe UI", sans-serif';
+    ctx.shadowColor = 'rgba(56, 182, 255, 0.35)';
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#6ec8ff';
+    ctx.fillText('📖 HISTÓRIA', w / 2, storyTitleY);
+    ctx.shadowBlur = 0;
+    ctx.font = '13px "Segoe UI", sans-serif';
+    ctx.fillStyle = '#9fb0c0';
+    ctx.fillText(`${view.completedCount} / 10 fases  •  ${view.totalStars} / 30 ⭐`, w / 2, storyTitleY + 22);
+
+    // Narrative lines at bottom
+    const narrativeLines = [
+      'A fronteira foi rompida.',
+      'O inimigo avança sobre o reino.',
+      'Cada vitória aproxima o exército da origem da Ruína.',
+    ];
+    ctx.font = '12px "Segoe UI", sans-serif';
+    ctx.fillStyle = 'rgba(159, 176, 192, 0.7)';
+    ctx.textAlign = 'center';
+    narrativeLines.forEach((line, i) => {
+      ctx.fillText(line, w / 2, h - 110 + i * 16);
+    });
+
+    // Tooltip for hovered node
+    if (view.hoveredNode && view.hoveredNode > 0) {
+      const node = view.nodes.find(n => n.number === view.hoveredNode);
+      if (node && _camera) {
+        const screenPos = _camera.worldToScreen(node.x, node.y);
+        this.drawStoryMapTooltip(node, screenPos.x, screenPos.y, 0, 0, 1, w, h);
+      }
+    }
+  }
+
+  private ensureStoryMapBg(): void {
+    if (this.storyMapBg) return;
+    const bg = document.createElement('canvas');
+    bg.width = STORY_MAP_DESIGN_W;
+    bg.height = STORY_MAP_DESIGN_H;
+    const ctx = bg.getContext('2d')!;
+    const rand = mulberry32(12345);
+    const W = bg.width;
+    const H = bg.height;
+
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#0d1a22');
+    sky.addColorStop(0.4, '#102028');
+    sky.addColorStop(0.7, '#142830');
+    sky.addColorStop(1, '#0a141a');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
+    for (let i = 0; i < 200; i++) {
+      const x = rand() * W;
+      const y = rand() * H * 0.6;
+      const r = 0.5 + rand() * 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const mountains: [number, number, number, number][] = [
+      [150, 650, 200, 180],
+      [350, 680, 180, 160],
+      [550, 620, 220, 200],
+      [800, 660, 160, 140],
+      [1000, 640, 190, 170],
+      [1100, 680, 150, 130],
+    ];
+    for (const [mx, my, mw, mh] of mountains) {
+      const peak = my - mh;
+      ctx.fillStyle = 'rgba(20, 30, 40, 0.6)';
+      ctx.beginPath();
+      ctx.moveTo(mx - mw / 2, my);
+      ctx.lineTo(mx, peak + rand() * 20);
+      ctx.lineTo(mx + mw / 2, my);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(30, 45, 55, 0.5)';
+      ctx.beginPath();
+      ctx.moveTo(mx - mw / 2.5, my);
+      ctx.lineTo(mx, peak + mh * 0.3);
+      ctx.lineTo(mx + mw / 2.5, my);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    const forests: [number, number, number][] = [
+      [200, 500, 80],
+      [400, 480, 70],
+      [600, 420, 90],
+      [850, 400, 75],
+      [950, 350, 60],
+    ];
+    for (const [fx, fy, fr] of forests) {
+      const n = 8 + Math.floor(rand() * 6);
+      for (let i = 0; i < n; i++) {
+        const a = rand() * Math.PI * 2;
+        const d = rand() * fr;
+        const tx = fx + Math.cos(a) * d;
+        const ty = fy + Math.sin(a) * d;
+        const s = 6 + rand() * 10;
+        ctx.fillStyle = 'rgba(10, 25, 15, 0.6)';
+        ctx.beginPath();
+        ctx.arc(tx + 1, ty + 2, s + 1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#1a3d2a';
+        ctx.beginPath();
+        ctx.arc(tx, ty, s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#2a5a3a';
+        ctx.beginPath();
+        ctx.arc(tx - s * 0.3, ty - s * 0.3, s * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    const riverPoints = [
+      { x: 100, y: 750 },
+      { x: 250, y: 650 },
+      { x: 450, y: 550 },
+      { x: 650, y: 450 },
+      { x: 850, y: 380 },
+      { x: 1000, y: 320 },
+      { x: 1150, y: 200 },
+    ];
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(80, 120, 160, 0.25)';
+    ctx.lineWidth = 18;
+    traceCurve(ctx, riverPoints);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(60, 100, 140, 0.35)';
+    ctx.lineWidth = 10;
+    traceCurve(ctx, riverPoints);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(100, 150, 200, 0.2)';
+    ctx.lineWidth = 4;
+    traceCurve(ctx, riverPoints);
+    ctx.stroke();
+
+    const ruins: [number, number, number, number][] = [
+      [1050, 180, 60, 80],
+      [1120, 100, 50, 70],
+      [1170, 60, 40, 60],
+    ];
+    for (const [rx, ry, rw, rh] of ruins) {
+      ctx.fillStyle = 'rgba(40, 30, 25, 0.7)';
+      ctx.fillRect(rx - rw / 2, ry - rh, rw, rh);
+      ctx.fillStyle = 'rgba(60, 45, 35, 0.5)';
+      ctx.fillRect(rx - rw / 2 + 5, ry - rh + 10, rw - 10, 15);
+      ctx.fillRect(rx - rw / 2 + 5, ry - rh + 30, rw - 10, 15);
+    }
+
+    const lake = [
+      { x: 300, y: 720 },
+      { x: 380, y: 680 },
+      { x: 420, y: 620 },
+      { x: 350, y: 600 },
+      { x: 280, y: 650 },
+    ];
+    ctx.fillStyle = 'rgba(60, 80, 100, 0.2)';
+    ctx.beginPath();
+    ctx.moveTo(lake[0].x, lake[0].y);
+    for (let i = 1; i < lake.length; i++) ctx.lineTo(lake[i].x, lake[i].y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(80, 100, 120, 0.15)';
+    ctx.beginPath();
+    ctx.moveTo(lake[0].x, lake[0].y);
+    for (let i = 1; i < lake.length; i++) ctx.lineTo(lake[i].x * 0.95 + lake[0].x * 0.05, lake[i].y * 0.95 + lake[0].y * 0.05);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(180, 150, 100, 0.08)';
+    for (let i = 0; i < 12; i++) {
+      const vx = 100 + rand() * 1000;
+      const vy = 400 + rand() * 300;
+      const vr = 30 + rand() * 40;
+      ctx.beginPath();
+      ctx.arc(vx, vy, vr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    this.storyMapBg = bg;
+  }
+
+  private storyMapBg: HTMLCanvasElement | null = null;
+  private storyMapTime = 0;
+
   renderMenu(dt: number, variant: MenuVariant): void {
     this.ensureMenuParticles(variant);
     this.menuTime += dt;
@@ -1777,10 +2571,18 @@ export class Renderer {
     const { ctx } = this;
     for (const p of projectiles) {
       if (!p.alive) continue;
+      const color = p.team === 'enemy' ? '#ff8fa3' : '#9ecbff';
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.3;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(p.prevX, p.prevY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
       const tail = 0.018;
       const tx = p.x - p.vx * tail;
       const ty = p.y - p.vy * tail;
-      const color = p.team === 'enemy' ? '#ff8fa3' : '#9ecbff';
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -2250,6 +3052,17 @@ export class Renderer {
         ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2);
         ctx.fill();
       }
+      if (u.attackPhase > 0) {
+        const ap = u.attackPhase / 0.18;
+        const ar = u.radius + 3 + (1 - ap) * 6;
+        ctx.globalAlpha = ap * 0.4;
+        ctx.strokeStyle = u.troopType === 'champion' ? '#ffd166' : u.troopType === 'boss' ? '#ff4655' : '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(u.x, u.y, ar, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       if (selected.has(u)) {
         const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 1000 * 6);
         const rr = u.radius + 4 + pulse * 1.5;
@@ -2324,47 +3137,75 @@ export class Renderer {
     const y = u.y;
     const accent = u.team === 'player' ? '#ffffff' : '#2a0d12';
     switch (u.troopType) {
-      case 'archer':
+      case 'archer': {
         ctx.fillStyle = u.color;
         ctx.beginPath();
-        ctx.moveTo(x, y - r * 1.05);
-        ctx.lineTo(x + r * 0.95, y + r * 0.75);
-        ctx.lineTo(x - r * 0.95, y + r * 0.75);
+        ctx.moveTo(x, y - r * 1.15);
+        ctx.lineTo(x + r * 0.85, y + r * 0.8);
+        ctx.lineTo(x - r * 0.85, y + r * 0.8);
         ctx.closePath();
         ctx.fill();
         ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
         ctx.beginPath();
-        ctx.moveTo(x, y - r * 0.45);
-        ctx.lineTo(x + r * 0.45, y + r * 0.75);
-        ctx.lineTo(x - r * 0.45, y + r * 0.75);
+        ctx.moveTo(x, y - r * 0.35);
+        ctx.lineTo(x + r * 0.4, y + r * 0.8);
+        ctx.lineTo(x - r * 0.4, y + r * 0.8);
         ctx.closePath();
         ctx.fill();
         ctx.strokeStyle = accent;
         ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.arc(x, y - r * 0.1, r * 0.5, Math.PI * 0.15, Math.PI * 0.85);
+        ctx.arc(x, y - r * 0.05, r * 0.45, Math.PI * 0.15, Math.PI * 0.85);
+        ctx.stroke();
+        ctx.strokeStyle = u.color;
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.arc(x + r * 0.7, y, r * 0.65, -Math.PI * 0.45, Math.PI * 0.45);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(200,200,200,0.5)';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(x + r * 0.7, y - r * 0.55);
+        ctx.lineTo(x + r * 0.7, y + r * 0.55);
         ctx.stroke();
         break;
-      case 'tank':
+      }
+      case 'tank': {
+        const tr = r * 1.15;
         ctx.fillStyle = u.color;
-        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+        ctx.fillRect(x - tr, y - tr, tr * 2, tr * 2);
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(x - r, y - r, r * 2, r * 2);
+        ctx.strokeRect(x - tr, y - tr, tr * 2, tr * 2);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
-        ctx.fillRect(x - r * 0.72, y - r * 0.72, r * 1.44, r * 0.34);
+        ctx.fillRect(x - tr * 0.72, y - tr * 0.72, tr * 1.44, tr * 0.34);
+        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - tr * 0.6, y - tr * 0.6, tr * 1.2, tr * 1.2);
         ctx.fillStyle = u.team === 'player' ? '#dceeff' : '#f0b6b0';
-        ctx.fillRect(x - r * 0.38, y - r * 0.38, r * 0.76, r * 0.76);
+        ctx.fillRect(x - tr * 0.38, y - tr * 0.38, tr * 0.76, tr * 0.76);
         ctx.fillStyle = accent;
         ctx.beginPath();
-        ctx.arc(x, y, r * 0.2, 0, Math.PI * 2);
+        ctx.arc(x, y, tr * 0.18, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+        ctx.lineWidth = 0.8;
+        ctx.strokeRect(x - tr * 0.85, y - tr * 0.85, tr * 1.7, tr * 0.12);
+        ctx.strokeRect(x - tr * 0.85, y + tr * 0.73, tr * 1.7, tr * 0.12);
         break;
-      case 'champion':
+      }
+      case 'champion': {
+        const t = performance.now() / 600;
+        const auraA = 0.15 + Math.sin(t) * 0.08;
+        ctx.strokeStyle = `rgba(255, 209, 102, ${auraA})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.strokeStyle = 'rgba(255, 209, 102, 0.9)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(x, y, r + 2.5, 0, Math.PI * 2);
+        ctx.arc(x, y, r + 2, 0, Math.PI * 2);
         ctx.stroke();
         ctx.fillStyle = u.color;
         star5(ctx, x, y, r + 1.5, r * 0.55);
@@ -2377,29 +3218,38 @@ export class Renderer {
         ctx.arc(x, y, r * 0.3, 0, Math.PI * 2);
         ctx.fill();
         break;
-      case 'boss':
+      }
+      case 'boss': {
+        const bt = performance.now() / 800;
+        const bAura = 0.25 + Math.sin(bt) * 0.1;
+        ctx.strokeStyle = `rgba(255, 70, 85, ${bAura})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(x, y, r + 6 + Math.sin(bt) * 2, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.strokeStyle = 'rgba(255, 70, 85, 0.55)';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(u.x, u.y, u.radius + 4, 0, Math.PI * 2);
+        ctx.arc(x, y, r + 4, 0, Math.PI * 2);
         ctx.stroke();
         ctx.fillStyle = u.color;
         ctx.beginPath();
-        ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2);
+        ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#ff4655';
         for (let i = 0; i < 6; i++) {
           const a = (i / 6) * Math.PI * 2 - Math.PI / 2;
           ctx.beginPath();
-          ctx.arc(u.x + Math.cos(a) * u.radius, u.y + Math.sin(a) * u.radius, 5, 0, Math.PI * 2);
+          ctx.arc(x + Math.cos(a) * r, y + Math.sin(a) * r, 5, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.fillStyle = '#ffd166';
         ctx.beginPath();
-        ctx.arc(u.x, u.y, u.radius * 0.28, 0, Math.PI * 2);
+        ctx.arc(x, y, r * 0.28, 0, Math.PI * 2);
         ctx.fill();
         break;
-      default:
+      }
+      default: {
         ctx.fillStyle = u.color;
         ctx.beginPath();
         ctx.moveTo(x + r * 0.28, y - r);
@@ -2414,11 +3264,31 @@ export class Renderer {
         ctx.moveTo(x + r * 0.12, y - r * 0.1);
         ctx.lineTo(x - r * 0.12, y + r * 0.55);
         ctx.stroke();
+        ctx.strokeStyle = 'rgba(200,210,220,0.6)';
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(x + r * 0.3, y - r * 0.9);
+        ctx.lineTo(x + r * 0.75, y - r * 0.2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x + r * 0.22, y - r * 0.82);
+        ctx.lineTo(x + r * 0.38, y - r * 0.98);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(180,195,210,0.35)';
+        ctx.beginPath();
+        ctx.arc(x - r * 0.4, y + r * 0.1, r * 0.28, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(200,210,220,0.4)';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.arc(x - r * 0.4, y + r * 0.1, r * 0.28, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.fillStyle = accent;
         ctx.beginPath();
         ctx.arc(x, y - r * 0.1, r * 0.28, 0, Math.PI * 2);
         ctx.fill();
         break;
+      }
     }
   }
 

@@ -10,7 +10,9 @@ export type InputEvent =
   | { type: 'recruit'; troopType: PlayerTroopType }
   | { type: 'formation'; kind: FormationKind }
   | { type: 'rotate' }
-  | { type: 'pause' };
+  | { type: 'pause' }
+  | { type: 'hover'; x: number; y: number }
+  | { type: 'wheel'; x: number; y: number; deltaY: number };
 
 export interface DragRect {
   x: number;
@@ -22,7 +24,6 @@ export interface DragRect {
 export class Input {
   keys = new Set<string>();
   dragRect: DragRect | null = null;
-  onWheel: ((e: WheelEvent) => void) | null = null;
 
   private events: InputEvent[] = [];
   private mouseX = 0;
@@ -58,6 +59,7 @@ export class Input {
     canvas.addEventListener('mousemove', (e) => {
       this.mouseX = e.clientX;
       this.mouseY = e.clientY;
+      this.events.push({ type: 'hover', x: e.clientX, y: e.clientY });
       if (this.leftDown) {
         if (!this.dragging) {
           const dx = this.mouseX - this.startX;
@@ -100,7 +102,7 @@ export class Input {
       'wheel',
       (e) => {
         e.preventDefault();
-        this.onWheel?.(e);
+        this.events.push({ type: 'wheel', x: e.clientX, y: e.clientY, deltaY: e.deltaY });
       },
       { passive: false },
     );

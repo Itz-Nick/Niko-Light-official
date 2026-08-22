@@ -2287,6 +2287,20 @@
           gap: 10px;
           padding: 6px 10px;
         }
+
+      .storymap-panel {
+        padding: 0;
+        min-width: 0;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+      }
+
+      .storymap-loading {
+        padding: 40px;
+        text-align: center;
+        color: var(--muted);
+      }
       }
 
       @media (max-width: 1180px) {
@@ -2595,7 +2609,7 @@
             <button class="palette-btn" data-creative-kind="structure" data-creative-type="wall">⛩️ Muralha</button>
             <button class="palette-btn" data-creative-kind="structure" data-creative-type="mine">⛏️ Mina</button>
           </div>
-          <div class="creative-actions">
+          <div class="creative-actions" id="creative-actions">
             <button class="btn" id="btn-creative-remove">🗑️ Remover</button>
           </div>
         </div>
@@ -2729,22 +2743,9 @@
       </div>
     </div>
 
-    <div id="storyselect" class="screen screen--backdrop" hidden>
-      <div class="panel">
-        <h2>História</h2>
-        <p class="modes-hint">Conclua uma fase para desbloquear a próxima.</p>
-        <div class="campaign-banner" id="campaignBanner" hidden>
-          🏆 <strong>Campanha concluída!</strong> O Senhor da Ruína foi derrotado.
-        </div>
-        <div class="campaign-progress-wrap" id="campaignProgressWrap">
-          <div class="campaign-progress-head">
-            <span><b id="campaignProgressText">0 de 10</b> fases concluídas</span>
-            <span class="campaign-stars" id="campaignProgressStars">★ 0 / 30</span>
-          </div>
-          <div class="campaign-bar"><div class="campaign-fill" id="campaignProgressFill"></div></div>
-        </div>
-        <div class="story-grid" id="storyGrid"></div>
-        <button class="btn" id="btn-story-back">Voltar</button>
+    <div id="storymap" class="screen screen--backdrop" hidden>
+      <div class="panel storymap-panel">
+        <div class="storymap-loading">Carregando mapa da campanha...</div>
       </div>
     </div>
 

@@ -62,6 +62,7 @@ export function updateBossAbilities(
       if (ab.timer > 0) continue;
       ab.phase = 'idle';
       ab.cooldown = CONFIG.boss.abilityCooldown;
+      boss.attackPhase = 0.18;
 
       const radiusSq = ab.radius * ab.radius;
       scratch.length = 0;

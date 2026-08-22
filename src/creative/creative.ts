@@ -153,8 +153,20 @@ export function creativePickDims(pick: CreativePick, team: CreativeTeam, rot: nu
   return { w: r * 2, h: r * 2 };
 }
 
+const TEAM_COLORS: Record<TroopType, { player: string; enemy: string }> = {
+  knight:  { player: '#38b6ff', enemy: '#ff4655' },
+  archer:  { player: '#4ec2ff', enemy: '#ff8fa3' },
+  tank:    { player: '#2ea8ff', enemy: '#e0563f' },
+  champion: { player: '#ffd166', enemy: '#ffb04d' },
+  boss:    { player: '#c0392b', enemy: '#c0392b' },
+};
+
 export function createCreativeUnit(entity: CreativeEntity): Unit {
-  return createUnit(creativeTeamOf(entity.team), entity.type as TroopType, entity.x, entity.y);
+  const unit = createUnit('player', entity.type as TroopType, entity.x, entity.y);
+  const foe = entity.team === 'red';
+  unit.team = foe ? 'enemy' : 'player';
+  unit.color = TEAM_COLORS[unit.troopType][foe ? 'enemy' : 'player'];
+  return unit;
 }
 
 function baseCreativeStructure(

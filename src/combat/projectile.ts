@@ -20,6 +20,8 @@ export interface Projectile {
   age: number;
   maxLife: number;
   alive: boolean;
+  prevX: number;
+  prevY: number;
 }
 
 let nextProjectileId = 1;
@@ -60,6 +62,8 @@ export function spawnArrow(
     age: 0,
     maxLife: CONFIG.projectiles.maxLife,
     alive: true,
+    prevX: shooter.x,
+    prevY: shooter.y,
   };
 }
 
@@ -85,6 +89,8 @@ export function spawnTowerShot(x: number, y: number, damage: number, target: Uni
     age: 0,
     maxLife: CONFIG.projectiles.maxLife,
     alive: true,
+    prevX: x,
+    prevY: y,
   };
 }
 
@@ -112,6 +118,8 @@ export function updateProjectiles(projectiles: Projectile[], dt: number): HitInf
     const d = Math.hypot(dx, dy) || 1;
     p.vx = (dx / d) * p.speed;
     p.vy = (dy / d) * p.speed;
+    p.prevX = p.x;
+    p.prevY = p.y;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
 

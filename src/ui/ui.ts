@@ -3,7 +3,6 @@ import type { Difficulty } from '../config';
 import type { Economy } from '../economy/economy';
 import type { SettingsStore } from '../settings/settings';
 import type { CampaignStore } from '../story/campaign';
-import { levelMeta } from '../story/levels';
 import { formatTime } from '../story/story';
 import type { LevelDef, LevelStats, StatLine } from '../story/story';
 import type { PlayerTroopType, TroopType } from '../types';
@@ -29,7 +28,7 @@ type ScreenName =
   | 'settings'
   | 'controls'
   | 'gameover'
-  | 'storyselect'
+  | 'storymap'
   | 'phaseintro'
   | 'storywin'
   | 'storyteaser'
@@ -50,7 +49,6 @@ const SCREENS: ScreenName[] = [
   'settings',
   'controls',
   'gameover',
-  'storyselect',
   'phaseintro',
   'storywin',
   'storyteaser',
@@ -99,8 +97,8 @@ interface UiHandlers {
   onCoopLocked?: () => void;
   onBackToMenu: () => void;
   onOpenStory: () => void;
-  onStoryBack: () => void;
-  onStoryPlay: (levelNumber: number) => void;
+  onStoryMapBack: () => void;
+  onStoryMapPlay: (levelNumber: number) => void;
   onStoryWinContinue: () => void;
   onStoryWinRetry: () => void;
   onStoryWinMenu: () => void;
@@ -184,9 +182,6 @@ export class Ui {
   private readonly storyWinUnlockEl: HTMLElement;
   private readonly storyLoseTextEl: HTMLElement;
   private readonly storyLoseStatsEl: HTMLElement;
-  private readonly campaignProgressFillEl: HTMLElement;
-  private readonly campaignProgressTextEl: HTMLElement;
-  private readonly campaignProgressStarsEl: HTMLElement;
   private readonly storyTeaserTitleEl: HTMLElement;
   private readonly storyTeaserStarsEl: HTMLElement;
   private readonly storyTeaserNarrationEl: HTMLElement;
@@ -198,7 +193,6 @@ export class Ui {
   private readonly campaignCompleteTitleEl: HTMLElement;
   private readonly campaignCompleteStarsEl: HTMLElement;
   private readonly campaignCompleteNarrationEl: HTMLElement;
-  private readonly campaignBannerEl: HTMLElement;
   private readonly toastEl: HTMLElement;
   private readonly prepSecsEl: HTMLElement;
   private readonly blockResourcesEl: HTMLElement;
@@ -243,7 +237,7 @@ export class Ui {
       settings: this.el('settings'),
       controls: this.el('controls'),
       gameover: this.el('gameover'),
-      storyselect: this.el('storyselect'),
+      storymap: this.el('storymap'),
       phaseintro: this.el('phaseintro'),
       storywin: this.el('storywin'),
       storyteaser: this.el('storyteaser'),
@@ -306,9 +300,6 @@ export class Ui {
     this.storyWinUnlockEl = this.el('storyWinUnlock');
     this.storyLoseTextEl = this.el('storyLoseText');
     this.storyLoseStatsEl = this.el('storyLoseStats');
-    this.campaignProgressFillEl = this.el('campaignProgressFill');
-    this.campaignProgressTextEl = this.el('campaignProgressText');
-    this.campaignProgressStarsEl = this.el('campaignProgressStars');
     this.storyTeaserTitleEl = this.el('storyTeaserTitle');
     this.storyTeaserStarsEl = this.el('storyTeaserStars');
     this.storyTeaserNarrationEl = this.el('storyTeaserNarration');
@@ -320,7 +311,6 @@ export class Ui {
     this.campaignCompleteTitleEl = this.el('campaignCompleteTitle');
     this.campaignCompleteStarsEl = this.el('campaignCompleteStars');
     this.campaignCompleteNarrationEl = this.el('campaignCompleteNarration');
-    this.campaignBannerEl = this.el('campaignBanner');
     this.toastEl = this.el('toast');
     this.prepSecsEl = this.el('prepSecs');
     this.blockResourcesEl = this.el('block-resources');
@@ -689,12 +679,15 @@ export class Ui {
   setCreativeLocked(locked: boolean): void {
     const editor = this.els['creative-editor'];
     for (const btn of editor.querySelectorAll<HTMLButtonElement>('button')) {
+      if (btn.closest('.creative-spectator')) continue;
       btn.disabled = locked;
     }
     const hud = this.el('creative-hud');
     hud.classList.toggle('locked', locked);
     this.el('creative-current-team').hidden = locked;
     this.el('creative-seg').hidden = locked;
+    this.el('creative-palette').hidden = locked;
+    this.el('creative-actions').hidden = locked;
     this.el('creative-spectator').hidden = !locked;
     this.el('btn-creative-start').hidden = locked;
   }
@@ -757,60 +750,9 @@ export class Ui {
     return { completed, stars };
   }
 
-  private updateCampaignProgress(): void {
-    const { completed, stars } = this.campaignProgress();
-    this.campaignProgressFillEl.style.width = `${(completed / 10) * 100}%`;
-    this.campaignProgressTextEl.textContent = `${completed} de 10`;
-    this.campaignProgressStarsEl.textContent = `★ ${stars} / 30`;
-  }
-
-  showStorySelect(): void {
+  showStoryMap(): void {
     this.hudEl.hidden = true;
-    this.renderStoryGrid();
-    this.show('storyselect');
-  }
-
-  private renderStoryGrid(): void {
-    const grid = this.el('storyGrid');
-    grid.textContent = '';
-    this.campaignBannerEl.hidden = !this.campaign.isComplete();
-    this.updateCampaignProgress();
-    let firstAvailable = 0;
-    for (let n = 1; n <= 10; n++) {
-      if (this.campaign.isUnlocked(n) && !this.campaign.isCompleted(n)) {
-        firstAvailable = n;
-        break;
-      }
-    }
-    for (let n = 1; n <= 10; n++) {
-      const meta = levelMeta(n);
-      const unlocked = this.campaign.isUnlocked(n);
-      const completed = this.campaign.isCompleted(n);
-      const stars = this.campaign.starsOf(n);
-      const isNext = unlocked && !completed && n === firstAvailable;
-      const card = document.createElement('div');
-      card.className = `story-card ${completed ? 'story-completed' : unlocked ? 'story-available' : 'story-locked'}${isNext ? ' story-next' : ''}`;
-      let stateHtml: string;
-      let button = '';
-      if (completed) {
-        stateHtml = `<span class="state-badge state-completed">✅ CONCLUÍDA</span>
-          <div class="stars">${starsHtml(stars)}</div>`;
-        button = `<button class="btn" data-story-play="${n}">Jogar novamente</button>`;
-      } else if (unlocked) {
-        stateHtml = `<span class="state-badge state-available">🔓 DISPONÍVEL</span>`;
-        button = `<button class="btn btn-primary" data-story-play="${n}">Jogar</button>`;
-      } else {
-        stateHtml = `<span class="state-badge state-locked">🔒 BLOQUEADA</span>`;
-      }
-      card.innerHTML = `
-        <span class="story-num">FASE ${n}</span>
-        <h3>${meta ? meta.name : ''}</h3>
-        <p>${meta ? meta.description : ''}</p>
-        ${stateHtml}
-        ${button}
-      `;
-      grid.appendChild(card);
-    }
+    this.show('storymap');
   }
 
   showPhaseIntro(level: LevelDef): void {
@@ -1159,11 +1101,6 @@ export class Ui {
     });
     this.el('btn-mode-story').addEventListener('click', () => this.handlers.onOpenStory());
     this.el('btn-modes-back').addEventListener('click', () => this.handlers.onBackToMenu());
-    this.el('storyGrid').addEventListener('click', (e) => {
-      const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-story-play]');
-      if (btn) this.handlers.onStoryPlay(Number(btn.dataset.storyPlay));
-    });
-    this.el('btn-story-back').addEventListener('click', () => this.handlers.onStoryBack());
     this.el('btn-story-win-continue').addEventListener('click', () => this.handlers.onStoryWinContinue());
     this.el('btn-story-win-select').addEventListener('click', () => this.handlers.onStoryWinContinue());
     this.el('btn-story-win-retry').addEventListener('click', () => this.handlers.onStoryWinRetry());

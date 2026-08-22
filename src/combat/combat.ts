@@ -28,6 +28,7 @@ export function updateCombat(
     u.attackTimer = Math.max(0, u.attackTimer - dt);
     u.thinkTimer -= dt;
     u.flashTimer = Math.max(0, u.flashTimer - dt);
+    if (u.attackPhase > 0) u.attackPhase = Math.max(0, u.attackPhase - dt);
 
     if (u.team === 'player' && u.moveTarget !== null && !u.aiControl) {
       u.attackTarget = null;
@@ -148,6 +149,7 @@ export function updateCombat(
         hits.push({ x: target.x, y: target.y, damage: dmg, source: 'unit', ranged: false });
       }
       u.attackTimer = u.attackCooldown;
+      u.attackPhase = 0.18;
     } else if (u.structureTarget && u.structureTarget.alive && inStructureRange(u, u.structureTarget)) {
       if (u.troopType === 'archer') {
         spawned.push(spawnArrow(u, u.damage, null, u.structureTarget));
@@ -163,6 +165,7 @@ export function updateCombat(
         });
       }
       u.attackTimer = u.attackCooldown;
+      u.attackPhase = 0.18;
     }
   }
 

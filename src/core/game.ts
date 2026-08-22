@@ -10,6 +10,7 @@ import { updateCombat } from '../combat/combat';
 import { updateProjectiles } from '../combat/projectile';
 import type { Projectile } from '../combat/projectile';
 import { updateUnits } from './movement';
+import { updateEffects, clearEffects, spawnSparks, spawnRing, spawnDust } from '../effects';
 import { createBase, createBaseAt, createCart, createMines, createMineAt, createCastleDefense } from '../entities/structures';
 import type { Structure } from '../entities/structures';
 import { applyTroopMods, createUnit } from '../entities/unit';
@@ -22,7 +23,9 @@ import { updateAutoFormation, resetAutoFormation, commandSquad } from '../format
 import { Input } from '../input/input';
 import type { InputEvent } from '../input/input';
 import { Renderer } from '../render/renderer';
-import type { BuildPreview, MenuVariant, RenderOverlay, WorldMarker } from '../render/renderer';
+import type { BuildPreview, MenuVariant, RenderOverlay, WorldMarker, StoryMapView, StoryMapNode } from '../render/renderer';
+import { STORY_MAP_PATH, STORY_MAP_NODE_ICONS, STORY_MAP_DESIGN_W, STORY_MAP_DESIGN_H } from '../render/renderer';
+import { StoryMapCamera } from '../render/renderer';
 import { SettingsStore } from '../settings/settings';
 import { CampaignStore } from '../story/campaign';
 import { levelByNumber } from '../story/levels';
@@ -67,7 +70,7 @@ import {
 import { CreativeAI, updateCreativeCaptures } from '../creative/creative-ai';
 import type { CreativeEditorView, CreativeGhost, CreativeSelected } from '../render/renderer';
 
-type Screen = 'menu' | 'modes' | 'difficulty' | 'creative' | 'creative-editor' | 'playing' | 'paused' | 'storyselect' | 'phaseintro' | 'continent';
+type Screen = 'menu' | 'modes' | 'difficulty' | 'creative' | 'creative-editor' | 'playing' | 'paused' | 'storymap' | 'phaseintro' | 'continent';
 
 const BIOME_TRANSITION_TIME = 1.6;
 
@@ -186,6 +189,7 @@ export class Game {
   private creativeRedAlivePrev = 0;
   private creativeSpeed: 1 | 2 | 4 = 1;
   private creativeBattleFlash = 0;
+  private storyMapCamera: StoryMapCamera | null = null;
 
   constructor() {
     this.canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -245,21 +249,21 @@ export class Game {
       },
       onOpenStory: () => {
         this.audio.playSfx('ui-confirm');
-        this.showStorySelect();
+        this.showStoryMap();
       },
-      onStoryBack: () => {
+      onStoryMapBack: () => {
         this.screen = 'modes';
         this.ui.showModes();
         this.syncMusic();
       },
-      onStoryPlay: (n) => this.startStoryLevel(n),
-      onStoryWinContinue: () => this.showStorySelect(),
+      onStoryMapPlay: (n) => this.startStoryLevel(n),
+      onStoryWinContinue: () => this.showStoryMap(),
       onStoryWinRetry: () => this.startStoryLevel(this.levelNumber),
       onStoryWinMenu: () => this.quitToMenu(),
       onPhaseIntroContinue: () => this.beginPhase(),
-      onStoryTeaserContinue: () => this.showStorySelect(),
+      onStoryTeaserContinue: () => this.showStoryMap(),
       onStoryTeaserMenu: () => this.quitToMenu(),
-      onCampaignCompleteContinue: () => this.showStorySelect(),
+      onCampaignCompleteContinue: () => this.showStoryMap(),
       onCampaignCompleteMenu: () => this.quitToMenu(),
       onStoryLoseRetry: () => this.startStoryLevel(this.levelNumber),
       onStoryLoseMenu: () => this.quitToMenu(),
@@ -286,7 +290,6 @@ export class Game {
     this.wireUiSounds();
     this.camera = new Camera(window.innerWidth, window.innerHeight);
     this.base = createBase();
-    this.input.onWheel = (e) => this.camera.zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.08 : 0.925);
     this.waves.setSpawnSink((u) => this.units.push(u));
     this.waves.onWaveComplete = (w) => this.onWaveComplete(w);
     window.addEventListener('resize', () => this.resize());
@@ -299,6 +302,7 @@ export class Game {
       { once: true },
     );
     this.resize();
+    this.storyMapCamera = new StoryMapCamera(window.innerWidth, window.innerHeight, STORY_MAP_DESIGN_W, STORY_MAP_DESIGN_H);
     this.reset();
     this.ui.showMenu();
   }
@@ -351,6 +355,9 @@ export class Game {
   private resize(): void {
     this.renderer.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
     this.camera.setViewSize(window.innerWidth, window.innerHeight);
+    if (this.storyMapCamera) {
+      this.storyMapCamera.setViewSize(window.innerWidth, window.innerHeight);
+    }
   }
 
   private loop = (time: number): void => {
@@ -371,8 +378,31 @@ export class Game {
         this.handlePauseKey();
         continue;
       }
+      if (e.type === 'wheel') {
+        if (this.screen === 'storymap' && this.storyMapCamera) {
+          this.storyMapCamera.zoomAt(e.x, e.y, e.deltaY < 0 ? 1.12 : 0.89);
+        } else {
+          this.camera.zoomAt(e.x, e.y, e.deltaY < 0 ? 1.08 : 0.925);
+        }
+        continue;
+      }
       if (this.screen === 'continent') {
         if (e.type === 'select') this.handleContinentClick(e.x, e.y);
+        if (e.type === 'hover') this.handleContinentHover(e.x, e.y);
+        continue;
+      }
+      if (this.screen === 'storymap') {
+        if (e.type === 'select') this.handleStoryMapClick(e.x, e.y);
+        if (e.type === 'hover') this.handleStoryMapHover(e.x, e.y);
+        if (e.type === 'drag' && this.storyMapCamera) {
+          this.storyMapCamera.startDrag(e.x1, e.y1);
+          this.storyMapCamera.drag(e.x2, e.y2);
+          this.storyMapCamera.endDrag();
+        }
+        if (e.type === 'rotate') {
+          this.reframeStoryMap();
+          this.audio.playSfx('ui-confirm');
+        }
         continue;
       }
       if (this.screen === 'creative-editor') {
@@ -384,11 +414,14 @@ export class Game {
 
     this.update(dt);
     this.updateMarkers(dt);
+    updateEffects(dt);
 
     const cart = this.mode === 'story' ? this.getCart() : null;
     const menuVariant = this.menuBackdropVariant();
     if (this.screen === 'continent') {
       this.renderer.renderContinent(dt, this.continentView());
+    } else if (this.screen === 'storymap') {
+      this.renderer.renderStoryMap(dt, this.storyMapView());
     } else if (this.screen === 'creative-editor') {
       this.renderer.renderCreativeEditor(this.camera, this.creativeUnits, this.creativeStructures, this.creativeView(), this.projectiles, this.markers);
     } else if (menuVariant) {
@@ -469,6 +502,7 @@ export class Game {
     this.gameOverShown = false;
     this.goldDelta = 0;
     this.markers.length = 0;
+    clearEffects();
     this.selected.clear();
     this.economy.gold = CONFIG.economy.startingGold;
     this.playerUnitCount = 0;
@@ -540,6 +574,7 @@ export class Game {
     this.gameOver = false;
     this.goldDelta = 0;
     this.markers.length = 0;
+    clearEffects();
     this.selected.clear();
     this.playerUnitCount = 0;
     this.renderedBiome = 'field';
@@ -557,6 +592,16 @@ export class Game {
   private update(dt: number): void {
     if (this.screen === 'creative-editor') {
       this.updateCreative(dt);
+      return;
+    }
+    if (this.screen === 'storymap') {
+      this.storyMapTime += dt;
+      this.goldDelta = 0;
+      this.audio.stopAmbient();
+      if (this.storyMapCamera) {
+        this.storyMapCamera.update(dt);
+        this.handleStoryMapKeyboardPan(dt);
+      }
       return;
     }
     if (this.screen !== 'playing') {
@@ -639,6 +684,8 @@ export class Game {
     for (const u of this.units) {
       if (!u.alive) {
         this.pushMarker(u.x, u.y, 'death');
+        spawnRing(u.x, u.y, 'rgba(255,100,120,0.6)', u.radius + 2, 0.3);
+        spawnSparks(u.x, u.y, 3, u.color, 60, 0.25);
         deaths++;
       }
     }
@@ -704,6 +751,8 @@ export class Game {
     for (const u of this.units) {
       if (!u.alive) {
         this.pushMarker(u.x, u.y, 'death');
+        spawnRing(u.x, u.y, 'rgba(255,100,120,0.6)', u.radius + 2, 0.3);
+        spawnSparks(u.x, u.y, 3, u.color, 60, 0.25);
         deaths++;
       }
     }
@@ -802,6 +851,8 @@ export class Game {
     for (const u of this.units) {
       if (!u.alive) {
         this.pushMarker(u.x, u.y, 'death');
+        spawnRing(u.x, u.y, 'rgba(255,100,120,0.6)', u.radius + 2, 0.3);
+        spawnSparks(u.x, u.y, 3, u.color, 60, 0.25);
         deaths++;
       }
     }
@@ -999,7 +1050,7 @@ export class Game {
         return 'modes';
       case 'creative':
         return 'creative';
-      case 'storyselect':
+      case 'storymap':
         return 'story';
       default:
         return null;
@@ -1171,6 +1222,11 @@ export class Game {
     for (const h of hits) {
       this.pushMarker(h.x, h.y, 'hit');
       this.pushMarker(h.x, h.y - 6, 'damage', `-${Math.round(h.damage)}`);
+      if (h.source !== 'unit') {
+        spawnDust(h.x, h.y, 2);
+      } else {
+        spawnSparks(h.x, h.y, 2, '#ffffff', 80, 0.15);
+      }
     }
   }
 
@@ -1461,6 +1517,7 @@ export class Game {
     this.ui.setCreativeSpeed(1);
     this.projectiles = [];
     this.markers.length = 0;
+    clearEffects();
     this.selected.clear();
     this.camera.setWorldSize(CONFIG.world.width, CONFIG.world.height);
     this.camera.x = CONFIG.world.width / 2;
@@ -1698,7 +1755,11 @@ export class Game {
     }
 
     for (const u of this.creativeUnits) {
-      if (!u.alive) this.pushMarker(u.x, u.y, 'death');
+      if (!u.alive) {
+        this.pushMarker(u.x, u.y, 'death');
+        spawnRing(u.x, u.y, 'rgba(255,100,120,0.6)', u.radius + 2, 0.3);
+        spawnSparks(u.x, u.y, 3, u.color, 60, 0.25);
+      }
     }
     this.creativeUnits = this.creativeUnits.filter((u) => u.alive);
     this.creativeStructures = this.creativeStructures.filter((s) => s.alive);
@@ -1837,6 +1898,7 @@ export class Game {
     }
     this.projectiles = [];
     this.markers.length = 0;
+    clearEffects();
     this.creativePhase = 'countdown';
     this.creativeCountdown = 3;
     this.lastCreativeCount = -1;
@@ -1866,6 +1928,7 @@ export class Game {
     }
     this.projectiles = [];
     this.markers.length = 0;
+    clearEffects();
     this.creativePhase = 'prep';
     this.creativeCountdown = 0;
     this.creativeSelectedId = null;
@@ -2040,6 +2103,61 @@ export class Game {
     };
   }
 
+  private storyMapView(): StoryMapView {
+    const nodes: StoryMapNode[] = [];
+    for (let n = 1; n <= 10; n++) {
+      const meta = levelByNumber(n);
+      const completed = this.campaign.isCompleted(n);
+      const unlocked = this.campaign.isUnlocked(n);
+      const stars = this.campaign.starsOf(n);
+      let state: 'locked' | 'available' | 'completed';
+      if (completed) state = 'completed';
+      else if (unlocked) state = 'available';
+      else state = 'locked';
+
+      nodes.push({
+        number: n,
+        x: STORY_MAP_PATH[n - 1].x,
+        y: STORY_MAP_PATH[n - 1].y,
+        name: meta?.name ?? `Fase ${n}`,
+        description: meta?.objective ?? '',
+        objective: meta?.objective ?? '',
+        biome: meta?.biome ?? 'field',
+        stars,
+        state,
+        icon: STORY_MAP_NODE_ICONS[n] ?? '🏰',
+      });
+    }
+
+    let completedCount = 0;
+    let totalStars = 0;
+    for (let n = 1; n <= 10; n++) {
+      if (this.campaign.isCompleted(n)) completedCount++;
+      totalStars += this.campaign.starsOf(n);
+    }
+
+    // Safe area: reserve top for title/progress and the campaign-complete panel,
+    // and bottom for the back/reframe buttons.
+    const campaignComplete = this.campaign.isComplete();
+    const topSafe = campaignComplete ? 140 : 90;
+    if (this.storyMapCamera) {
+      this.storyMapCamera.setSafeArea(topSafe, 90, 20, 20);
+    }
+
+    return {
+      nodes,
+      hoveredNode: this.storyMapHoveredNode,
+      campaignComplete,
+      totalStars,
+      completedCount,
+      time: this.storyMapTime,
+      camera: this.storyMapCamera!,
+    };
+  }
+
+  private storyMapTime = 0;
+  private storyMapHoveredNode: number | null = null;
+
   private handleContinentClick(screenX: number, screenY: number): void {
     const t = continentTransform(window.innerWidth, window.innerHeight);
     const back = regionScreenRect(CONTINENT_BACK_BUTTON, t);
@@ -2064,6 +2182,103 @@ export class Game {
     }
   }
 
+  private handleContinentHover(_screenX: number, _screenY: number): void {
+    // No-op for now - continent doesn't need hover handling
+  }
+
+  private handleStoryMapClick(screenX: number, screenY: number): void {
+    if (!this.storyMapCamera) return;
+    const h = window.innerHeight;
+
+    const backRect = { x: 20, y: h - 70, w: 120, h: 50 };
+    if (screenX >= backRect.x && screenX < backRect.x + backRect.w && screenY >= backRect.y && screenY < backRect.y + backRect.h) {
+      this.screen = 'modes';
+      this.ui.showModes();
+      this.syncMusic();
+      this.audio.playSfx('ui-click');
+      return;
+    }
+
+    const reframeRect = { x: backRect.x + backRect.w + 10, y: h - 70, w: 50, h: 50 };
+    if (screenX >= reframeRect.x && screenX < reframeRect.x + reframeRect.w && screenY >= reframeRect.y && screenY < reframeRect.y + reframeRect.h) {
+      this.reframeStoryMap();
+      this.audio.playSfx('ui-confirm');
+      return;
+    }
+
+    const worldPos = this.storyMapCamera.screenToWorld(screenX, screenY);
+    const view = this.storyMapView();
+    for (const node of view.nodes) {
+      const dx = worldPos.x - node.x;
+      const dy = worldPos.y - node.y;
+      const radius = 36; // map coordinate radius
+      if (dx * dx + dy * dy <= radius * radius) {
+        if (node.state === 'available' || node.state === 'completed') {
+          this.audio.playSfx('ui-confirm');
+          this.startStoryLevel(node.number);
+        } else if (node.state === 'locked') {
+          this.audio.playSfx('ui-denied');
+          this.ui.showToast('Fase bloqueada — conclua a fase anterior', 'alert');
+        }
+        return;
+      }
+    }
+  }
+
+  private handleStoryMapHover(screenX: number, screenY: number): void {
+    if (!this.storyMapCamera) return;
+    // Suppress hover/tooltip while a drag is in progress
+    if (this.input.dragRect) {
+      this.storyMapHoveredNode = null;
+      return;
+    }
+    const h = window.innerHeight;
+
+    const backRect = { x: 20, y: h - 70, w: 120, h: 50 };
+    if (screenX >= backRect.x && screenX < backRect.x + backRect.w && screenY >= backRect.y && screenY < backRect.y + backRect.h) {
+      this.storyMapHoveredNode = -1;
+      return;
+    }
+
+    const reframeRect = { x: backRect.x + backRect.w + 10, y: h - 70, w: 50, h: 50 };
+    if (screenX >= reframeRect.x && screenX < reframeRect.x + reframeRect.w && screenY >= reframeRect.y && screenY < reframeRect.y + reframeRect.h) {
+      this.storyMapHoveredNode = -2;
+      return;
+    }
+
+    const worldPos = this.storyMapCamera.screenToWorld(screenX, screenY);
+    const view = this.storyMapView();
+    let hovered: number | null = null;
+    for (const node of view.nodes) {
+      const dx = worldPos.x - node.x;
+      const dy = worldPos.y - node.y;
+      const radius = 36; // map coordinate radius
+      if (dx * dx + dy * dy <= radius * radius) {
+        hovered = node.number;
+        break;
+      }
+    }
+    this.storyMapHoveredNode = hovered;
+  }
+
+  private handleStoryMapKeyboardPan(dt: number): void {
+    if (!this.storyMapCamera) return;
+    const keys = this.input.keys;
+    const moveSpeed = 400 / this.storyMapCamera.getZoom(); // map units per second
+    let dx = 0;
+    let dy = 0;
+    if (keys.has('KeyW') || keys.has('ArrowUp')) dy -= 1;
+    if (keys.has('KeyS') || keys.has('ArrowDown')) dy += 1;
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) dx -= 1;
+    if (keys.has('KeyD') || keys.has('ArrowRight')) dx += 1;
+    if (dx !== 0 || dy !== 0) {
+      const len = Math.hypot(dx, dy);
+      dx = (dx / len) * moveSpeed * dt;
+      dy = (dy / len) * moveSpeed * dt;
+      this.storyMapCamera.move(dx, dy);
+    }
+  }
+
   private resetAdventure(): void {
     this.mode = 'adventures';
     this.level = null;
@@ -2083,6 +2298,7 @@ export class Game {
     this.gameOver = false;
     this.goldDelta = 0;
     this.markers.length = 0;
+    clearEffects();
     this.selected.clear();
     this.economy.gold = CONFIG.adventure.startingGold;
     this.playerUnitCount = 0;
@@ -2131,15 +2347,49 @@ export class Game {
     this.audio.playSfx('ui-confirm');
   }
 
-  private showStorySelect(): void {
-    this.screen = 'storyselect';
+  private showStoryMap(): void {
+    this.screen = 'storymap';
     this.mode = null;
     this.level = null;
     this.storyOver = false;
     this.storyResultShown = false;
     this.ui.setMode('infinite');
-    this.ui.showStorySelect();
+    this.ui.showStoryMap();
     this.syncMusic();
+    this.setupStoryMapInitialFrame();
+  }
+
+  private storyMapFocusNode(): number {
+    // Find the next available phase, or the last completed one, or phase 1
+    let targetNode = 1;
+    for (let n = 1; n <= 10; n++) {
+      if (this.campaign.isUnlocked(n) && !this.campaign.isCompleted(n)) {
+        targetNode = n;
+        break;
+      }
+      if (this.campaign.isCompleted(n)) {
+        targetNode = n;
+      }
+    }
+
+    // If campaign is complete, focus on phase 10
+    if (this.campaign.isComplete()) {
+      targetNode = 10;
+    }
+    return targetNode;
+  }
+
+  private setupStoryMapInitialFrame(): void {
+    if (!this.storyMapCamera) return;
+    const target = STORY_MAP_PATH[this.storyMapFocusNode() - 1];
+    this.storyMapCamera.setPositionAndZoom(target.x, target.y, 1.0);
+  }
+
+  private reframeStoryMap(): void {
+    if (!this.storyMapCamera) return;
+    const target = STORY_MAP_PATH[this.storyMapFocusNode() - 1];
+    this.storyMapCamera.setTargetPosition(target.x, target.y);
+    this.storyMapCamera.setTargetZoom(1.0);
   }
 
   private resume(): void {
@@ -2170,7 +2420,7 @@ export class Game {
   }
 
   private syncMusic(): void {
-    if (this.screen === 'menu' || this.screen === 'modes' || this.screen === 'difficulty' || this.screen === 'creative' || this.screen === 'storyselect' || this.screen === 'continent') {
+    if (this.screen === 'menu' || this.screen === 'modes' || this.screen === 'difficulty' || this.screen === 'creative' || this.screen === 'storymap' || this.screen === 'continent') {
       this.audio.playMusic('menu');
     } else {
       this.audio.playMusic('battle');
@@ -2194,7 +2444,7 @@ export class Game {
       this.screen = 'menu';
       this.ui.showMenu();
       this.syncMusic();
-    } else if (this.screen === 'storyselect') {
+    } else if (this.screen === 'storymap') {
       this.screen = 'modes';
       this.ui.showModes();
       this.syncMusic();
